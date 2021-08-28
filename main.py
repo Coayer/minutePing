@@ -1,6 +1,9 @@
 from json import load
 from sys import exit
-from machine import Timer
+from machine import Timer, RTC, WDT
+import ntptime
+import umail
+import uping
 import logging
 
 VALID_SERVICE_TYPES = ["icmp", "http", "dns"]
@@ -26,10 +29,8 @@ class Service:
             "Initialized service {}, type {} with host {}".format(service_config["name"], service_config["type"],
                                                                   service_config["host"]))
 
-    def get_check_interval(self):
-        return self.CHECK_INTERVAL
-
     def check(self):
+        wdt.feed()
         if self.test_service():
             self.failures = 0
             self.notified = False
@@ -42,11 +43,16 @@ class Service:
 
     def check_number_failures(self):
         if self.failures >= self.NOTIFY_AFTER_FAILURES and not self.notified:
-            self.notified = self.notify()
+            self.notified = notify(self)
 
-    def notify(self):
-        print("AHHHHHH!!!!!!!!")
-        return True
+    def get_name(self):
+        return self.NAME
+
+    def get_check_interval(self):
+        return self.CHECK_INTERVAL
+
+    def get_number_of_failures(self):
+        return self.failures
 
 
 class HTTPService(Service):
@@ -59,10 +65,33 @@ class ICMPService(Service):
     def __init__(self, service_config):
         Service.__init__(service_config)
 
+    def test_service(self):
+        return uping.ping(self.HOST, count=1, timeout=self.TIMEOUT*1000, quiet=True)[1] == 1
+
 
 class DNSService(Service):
     def __init__(self, service_config):
         Service.__init__(service_config)
+
+
+def notify(service_object):
+    smtp = umail.SMTP(SMTP_SERVER, SMTP_PORT, username=SMTP_USERNAME, password=SMTP_PASSWORD, ssl=SMTP_SSL_ENABLED)
+
+    minutes_since_failure = service_object.get_check_interval() * service_object.get_number_of_failures() / 60
+    current_time = rtc.now()
+
+    logging.info("Sending email notification...")
+
+    smtp.to(RECIPIENT_EMAIL_ADDRESSES)
+    smtp.send("Subject: Monitored service {} is offline\n\n"
+              "Current time: {}:{}:{} {}/{:02d}/{} UTC+{}"
+              "Monitored service {} was detected as offline {} minutes ago.".format(service_object.get_name(),
+                                                                                    current_time[3], current_time[4], current_time[5],
+                                                                                    current_time[2], current_time[1], current_time[0],
+                                                                                    current_time[7], service_object.get_name(),
+                                                                                    minutes_since_failure))
+    smtp.quit()
+    return True    # if notification was successful
 
 
 with open("config.json", "r") as config_file:
@@ -91,13 +120,13 @@ try:
     RECIPIENT_EMAIL_ADDRESSES = config["email"]["recipient_addresses"]
     SMTP_SERVER = config["email"]["smtp_server"]
     SMTP_PORT = config["email"]["port"]
-    SMTP_SSL_ENABLED = config["email"]["ssl"]
+    SMTP_SSL_ENABLED = (config["email"]["ssl"] if "ssl" in config["email"] else False)
     SMTP_USERNAME = config["email"]["username"]
     SMTP_PASSWORD = config["email"]["password"]
 
     monitored_services = []
 
-    for service_config in config["email"]["services"]:
+    for service_config in config["services"]:
         if service_config["type"] not in VALID_SERVICE_TYPES:
             logging.error("Service type {} for {} is invalid".format(service_config["type"], service_config["name"]))
             exit(1)
@@ -111,6 +140,10 @@ try:
 except KeyError as e:
     logging.error("Missing required configuration value " + e.args[0])
     exit(1)
+
+wdt = WDT()
+rtc = RTC()
+ntptime.settime()
 
 monitoring_timer = Timer(-1)
 for service in monitored_services:
