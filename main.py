@@ -5,6 +5,8 @@ import ntptime
 import umail
 import uping
 import logging
+import network
+import socket
 
 VALID_SERVICE_TYPES = ["icmp", "http", "dns"]
 DEFAULT_CHECK_INTERVAL = 60
@@ -30,7 +32,6 @@ class Service:
                                                                   service_config["host"]))
 
     def check(self):
-        wdt.feed()
         if self.test_service():
             self.failures = 0
             self.notified = False
@@ -60,6 +61,21 @@ class HTTPService(Service):
         Service.__init__(service_config)
         self.PORT = (service_config["port"] if "port" in service_config else 80)
 
+        split = self.HOST.split('/', 1)
+        if len(split) == 2:
+            self.HOST, self.PATH = split
+        else:
+            self.PATH = '/'
+
+    def test_service(self):
+        addr = socket.getaddrinfo(self.HOST, self.PORT)[0][-1]
+        s = socket.socket()
+        s.connect(addr)
+        s.send(bytes("GET /{} HTTP/1.0\r\nHost: {}}\r\n\r\n".format(self.PATH, self.HOST), "utf-8"))
+        data = s.recv(15)   # will not work with HTTP versions >= 10.0
+        s.close()
+        return str(data, "utf-8").split()[1] == 200
+
 
 class ICMPService(Service):
     def __init__(self, service_config):
@@ -75,23 +91,27 @@ class DNSService(Service):
 
 
 def notify(service_object):
-    smtp = umail.SMTP(SMTP_SERVER, SMTP_PORT, username=SMTP_USERNAME, password=SMTP_PASSWORD, ssl=SMTP_SSL_ENABLED)
-
     minutes_since_failure = service_object.get_check_interval() * service_object.get_number_of_failures() / 60
     current_time = rtc.now()
 
     logging.info("Sending email notification...")
 
-    smtp.to(RECIPIENT_EMAIL_ADDRESSES)
-    smtp.send("Subject: Monitored service {} is offline\n\n"
-              "Current time: {}:{}:{} {}/{:02d}/{} UTC+{}"
-              "Monitored service {} was detected as offline {} minutes ago.".format(service_object.get_name(),
-                                                                                    current_time[3], current_time[4], current_time[5],
-                                                                                    current_time[2], current_time[1], current_time[0],
-                                                                                    current_time[7], service_object.get_name(),
-                                                                                    minutes_since_failure))
-    smtp.quit()
-    return True    # if notification was successful
+    try:
+        smtp = umail.SMTP(SMTP_SERVER, SMTP_PORT, username=SMTP_USERNAME, password=SMTP_PASSWORD, ssl=SMTP_SSL_ENABLED)
+
+        smtp.to(RECIPIENT_EMAIL_ADDRESSES)
+        smtp.send("Subject: Monitored service {} is offline\n\n"
+                  "Current time: {}:{}:{} {}/{:02d}/{} UTC+{}"
+                  "Monitored service {} was detected as offline {} minutes ago.".format(service_object.get_name(),
+                                                                                        current_time[3], current_time[4], current_time[5],
+                                                                                        current_time[2], current_time[1], current_time[0],
+                                                                                        current_time[7], service_object.get_name(),
+                                                                                        minutes_since_failure))
+        smtp.quit()
+        return True
+    except AssertionError as e:
+        logging.error("Failed to send email notification: " + e)
+        return False
 
 
 with open("config.json", "r") as config_file:
@@ -141,14 +161,34 @@ except KeyError as e:
     logging.error("Missing required configuration value " + e.args[0])
     exit(1)
 
-wdt = WDT()
+ap_if = network.WLAN(network.AP_IF)
+ap_if.active(False)
+
+logging.info("Connecting to WiFi network...")
+
+sta_if = network.WLAN(network.STA_IF)
+sta_if.active(True)
+if STATIC_ADDRESS is not None:
+    sta_if.ifconfig(STATIC_ADDRESS)
+
+sta_if.connect(SSID, WIFI_PASSWORD)
+while not sta_if.isconnected():
+    pass
+
+logging.info("Setting NTP time...")
+
 rtc = RTC()
 ntptime.settime()
 
+logging.info("Starting watchdog timer...")
+
 monitoring_timer = Timer(-1)
+wdt = WDT()
+
+monitoring_timer.init(period=1000, mode=Timer.PERIODIC, callback=lambda t: wdt.feed())  # watchdog timer feeder
 for service in monitored_services:
     monitoring_timer.init(
         period=service.get_check_interval() * 1000,
         mode=Timer.PERIODIC,
-        callback=lambda: service.check()
+        callback=lambda t: service.check()
     )
