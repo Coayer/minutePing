@@ -1,6 +1,17 @@
 # ESPing
 
-### Config file format
+
+## Installation
+
+---
+
+#TODO
+
+## Configuration
+
+---
+
+### Configuration file format
 
 ```json
 {

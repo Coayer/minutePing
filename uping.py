@@ -25,7 +25,7 @@ def ping(host, count=4, timeout=5000, interval=10, quiet=False, size=64):
     import uctypes
     import usocket
     import ustruct
-    import urandom
+    import uos
 
     # prepare packet
     assert size >= 16, "pkt size too small"
@@ -34,7 +34,7 @@ def ping(host, count=4, timeout=5000, interval=10, quiet=False, size=64):
         "type": uctypes.UINT8 | 0,
         "code": uctypes.UINT8 | 1,
         "checksum": uctypes.UINT16 | 2,
-        "id": uctypes.UINT16 | 4,
+        "id": (uctypes.ARRAY | 4, 2 | uctypes.UINT8),
         "seq": uctypes.INT16 | 6,
         "timestamp": uctypes.UINT64 | 8,
     } # packet header descriptor
@@ -42,14 +42,18 @@ def ping(host, count=4, timeout=5000, interval=10, quiet=False, size=64):
     h.type = 8 # ICMP_ECHO_REQUEST
     h.code = 0
     h.checksum = 0
-    h.id = urandom.randint(0, 65535)
+    h.id[0:2] = uos.urandom(2)
     h.seq = 1
 
     # init socket
     sock = usocket.socket(usocket.AF_INET, usocket.SOCK_RAW, 1)
     sock.setblocking(0)
     sock.settimeout(timeout/1000)
-    addr = usocket.getaddrinfo(host, 1)[0][-1][0] # ip address
+    try:
+        addr = usocket.getaddrinfo(host, 1)[0][-1][0] # ip address
+    except IndexError:
+        not quiet and print("Could not determine the address of", host)
+        return None
     sock.connect((addr, 1))
     not quiet and print("PING %s (%s): %u data bytes" % (host, addr, len(pkt)))
 
