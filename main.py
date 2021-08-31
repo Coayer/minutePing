@@ -10,7 +10,7 @@ import time
 
 VALID_SERVICE_TYPES = ["icmp", "http", "dns"]
 DEFAULT_CHECK_INTERVAL = 60
-DEFAULT_TIMEOUT = 5
+DEFAULT_TIMEOUT = 1
 DEFAULT_NOTIFY_AFTER_FAILURES = 3
 
 
@@ -29,8 +29,7 @@ class Service:
         self.failures = 0
         self.notified = False
 
-        print("Initialized service {}, type {} with location {}".format(service_config["name"], service_config["type"],
-                                                                                            service_config["host"]))
+        print("Initialized service {} {}".format(service_config["name"], service_config["host"]))
 
     def check(self):
         self.last_checked = time.time()
@@ -39,19 +38,21 @@ class Service:
         if self.test_service():
             print("Success")
             self.failures = 0
-            self.notified = False
+
+            if self.notified:
+                notify(self, "online")
+                self.notified = False
+
         else:
-            print("Failure +1")
+            print("Failure")
             self.failures += 1
-            self.check_number_failures()
+
+            if self.failures >= self.NOTIFY_AFTER_FAILURES and not self.notified:
+                print(self.NAME + " reached failure threshold!")
+                self.notified = notify(self, "offline")
 
     def test_service(self):
         return True
-
-    def check_number_failures(self):
-        if self.failures >= self.NOTIFY_AFTER_FAILURES and not self.notified:
-            print(self.NAME + " failure!")
-            self.notified = notify(self)
 
     def get_last_checked(self):
         return self.last_checked
@@ -110,21 +111,33 @@ class DNSService(Service):
             result = sock.recvfrom(4096)[0]
 
             # Checks if response has same ID as request, no errors reported and 1 question 1 answer
-            return result[0:2] == b"\xAA\xAA" and result[3] & 0x0F == 0 and result[5] == result[7] == b"\x01"
+            return result[0:2] == b"\xAA\xAA" and result[3] & 0x0F == 0 and result[5] == result[7] == 1
         except OSError:
             return False
 
 
-def notify(service_object):
-    minutes_since_failure = service_object.get_check_interval() * service_object.get_number_of_failures() / 60
-
+def set_time():
     print("Fetching NTP time...")
 
-    try:
-        ntptime.settime()
-    except OSError:
-        print("Failed to fetch NTP time")
-        return False
+    number_ntp_fetches = 10  # ntp fetching is temperamental
+    for ntp_fetch in range(number_ntp_fetches):
+        try:
+            ntptime.settime()
+            break
+        except (OSError, OverflowError):
+            if ntp_fetch == number_ntp_fetches - 1:
+                print("Failed to set NTP time")
+                return False
+            else:
+                pass
+
+
+def notify(service_object, status):
+    set_time()
+
+    minutes_since_failure = service_object.get_check_interval() * service_object.get_number_of_failures() / 60
+    minutes_since_failure = int(minutes_since_failure) if int(minutes_since_failure) == minutes_since_failure \
+        else round(minutes_since_failure, 1)
 
     current_time = rtc.datetime()
 
@@ -132,19 +145,21 @@ def notify(service_object):
 
     try:
         smtp = umail.SMTP(SMTP_SERVER, SMTP_PORT, username=SMTP_USERNAME, password=SMTP_PASSWORD, ssl=SMTP_SSL_ENABLED)
-
+        # to = RECIPIENT_EMAIL_ADDRESSES if type(RECIPIENT_EMAIL_ADDRESSES) == str else ", ".join(RECIPIENT_EMAIL_ADDRESSES)
         smtp.to(RECIPIENT_EMAIL_ADDRESSES)
-        smtp.send("Subject: Monitored service {} is offline\n\n"
-                  "Current time: {}:{}:{} {}/{:02d}/{} UTC+{}"
-                  "Monitored service {} was detected as offline {:.1f} minutes ago.".format(service_object.get_name(),
-                                                                                        current_time[3], current_time[4], current_time[5],
+        smtp.send("From: ESPmonitor <{}>\n"
+                  "Subject: Monitored service {} is {}\n\n"
+                   "Current time: {:02d}:{:02d}:{:02d} {:02d}/{:02d}/{} UTC\n\n"
+                   "Monitored service {} was detected as {} {} minutes ago.".format(SMTP_USERNAME, service_object.get_name(), status,
+                                                                                        current_time[4], current_time[5], current_time[6],
                                                                                         current_time[2], current_time[1], current_time[0],
-                                                                                        current_time[7], service_object.get_name(),
-                                                                                        minutes_since_failure))
+                                                                                        service_object.get_name(), status, minutes_since_failure))
         smtp.quit()
+
+        print("Email successfully sent")
         return True
-    except AssertionError as e:
-        print("Failed to send email notification: " + e)
+    except (AssertionError, OSError) as e:
+        print("Failed to send email notification: " + e.args[0])
         return False
 
 
@@ -177,6 +192,8 @@ try:
     SMTP_SSL_ENABLED = (config["email"]["ssl"] if "ssl" in config["email"] else False)
     SMTP_USERNAME = config["email"]["username"]
     SMTP_PASSWORD = config["email"]["password"]
+
+    SEND_TEST_EMAIL = (config["email"]["send_test_email"] if "send_test_email" in config["email"] else False)
 
     monitored_services = []
 
@@ -213,6 +230,9 @@ while not sta_if.isconnected():
 
 print("Starting real-time clock...")
 rtc = RTC()
+
+if SEND_TEST_EMAIL:
+    notify(Service({"name": "TEST EMAIL SERVICE", "host": "email.test"}), "BEING TESTED")
 
 while True:
     for service in monitored_services:
