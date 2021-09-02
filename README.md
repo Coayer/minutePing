@@ -1,19 +1,18 @@
-# ESPing
+# MinutePing
 
+A status notifier written for the ESP8266 in MicroPython. Supports email notifications.
 
 ## Installation
 
----
-
-Download the latest stable firmware from https://micropython.org/download/esp8266/
+Download the latest stable firmware for your ESP8266 from https://micropython.org/download/esp8266/
 
 Linux:
 ```bash
-git clone https://gitlab.com/coayer/PROJECT_NAME.git
+git clone https://gitlab.com/coayer/MinutePing.git
 
 # creates Python venv in current directory and installs tools
-python -m venv PROJECT_NAME
-source PROJECT_NAME/bin/activate
+python -m venv MinutePing
+source MinutePing/bin/activate
 pip install esptool rshell
 
 sudo usermod -aG dialout $USER  # user needs dialout permissions or root
@@ -27,15 +26,44 @@ connect serial /dev/ttyUSB0
 cp main.py umail.py uping.py config.json /pyboard
 ```
 
+To enable remote access, set up the MicroPython WebREPL while inside an rshell REPL prompt:
+```bash
+rshell
+connect serial /dev/ttyUSB0
+repl
+```
+`>>> import webrepl_setup`
+
+Then visit http://micropython.org/webrepl/ and enter your board's IP address and WebREPL password.
+
+## Updating
+
+#### MicroPython firmware
+
+Follow the installation commands from the `esptool.py` commands onwards.
+
+#### MinutePing or `config.json` via `rshell`:
+```bash
+git clone https://gitlab.com/coayer/MinutePing.git
+rshell
+connect serial /dev/ttyUSB0
+cp MinutePing/main.py /pyboard  # might also require an update to config.json
+```
+
+#### MinutePing or `config.json` file via WebREPL
+
+Follow the remote access setup above (under Installation) and visit http://micropython.org/webrepl/. 
+Enter your board's IP address and WebREPL password and upload the new files with the "Send a file" option.
+Click the terminal widget and press `CTRL+D` to reboot.
+
+
 ## Configuration
 
----
-
-PROJECT_NAME uses a JSON configuration file called `config.json` for its settings. For information on each option, refer to the sections below.
+MinutePing uses a JSON configuration file called `config.json` for its settings. For information on each option, refer to the sections below.
 
 See the `sample_config.json` file for a starter configuration file. Either copy-paste into a new file called `config.json` or rename to `config.json` and fill in the blanks. 
 
-To test the email configuration is working, set the `send_test_email` option to `true` in the `email` section. This will send a test email using the settings from the `configuration.json` file when PROJECT_NAME starts. It may be marked as spam, so refer to your email provider's documentation on whitelisting email addresses. 
+To test the email configuration is working, set the `send_test_email` option to `true` in the `email` section. This will send a test email using the settings from the `configuration.json` file when MinutePing starts. It may be marked as spam, so refer to your email provider's documentation on whitelisting email addresses. 
 
 ### Configuration file format
 

@@ -105,11 +105,13 @@ class DNSService(Service):
     def test_service(self):
         try:
             sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            sock.sendto(b"\xAA\xAA\x01\x00\x00\x01\x00\x00\x00\x00\x00\x00\x07\x65\x78\x61\x6d\x70\x6c\x65\x03\x63\x6f"
-                        b"\x6d\x00\x00\x01\x00\x01", (self.HOST, 53))
+            sock.sendto(b"\xAA\xAA\x01\x00\x00\x01\x00\x00\x00\x00\x00\x00"
+                        b"\x0a\x6d\x69\x6e\x75\x74\x65\x70\x69\x6e\x67\x04\x74\x65\x73\x74"
+                        b"\x00\x00\x01\x00\x01", (self.HOST, 53))
             sock.settimeout(self.TIMEOUT)
             result = sock.recvfrom(4096)[0]
-
+            sock.close()
+            # TODO accept NXDOMAIN responses
             # Checks if response has same ID as request, no errors reported and 1 question 1 answer
             return result[0:2] == b"\xAA\xAA" and result[3] & 0x0F == 0 and result[5] == result[7] == 1
         except OSError:
@@ -147,7 +149,7 @@ def notify(service_object, status):
         smtp = umail.SMTP(SMTP_SERVER, SMTP_PORT, username=SMTP_USERNAME, password=SMTP_PASSWORD, ssl=SMTP_SSL_ENABLED)
         # to = RECIPIENT_EMAIL_ADDRESSES if type(RECIPIENT_EMAIL_ADDRESSES) == str else ", ".join(RECIPIENT_EMAIL_ADDRESSES)
         smtp.to(RECIPIENT_EMAIL_ADDRESSES)
-        smtp.send("From: ESPmonitor <{}>\n"
+        smtp.send("From: MinutePing <{}>\n"
                   "Subject: Monitored service {} is {}\n\n"
                    "Current time: {:02d}:{:02d}:{:02d} {:02d}/{:02d}/{} UTC\n\n"
                    "Monitored service {} was detected as {} {} minutes ago.".format(SMTP_USERNAME, service_object.get_name(), status,
@@ -189,11 +191,11 @@ try:
     RECIPIENT_EMAIL_ADDRESSES = config["email"]["recipient_addresses"]
     SMTP_SERVER = config["email"]["smtp_server"]
     SMTP_PORT = config["email"]["port"]
-    SMTP_SSL_ENABLED = (config["email"]["ssl"] if "ssl" in config["email"] else False)
+    SMTP_SSL_ENABLED = config["email"]["ssl"] if "ssl" in config["email"] else False
     SMTP_USERNAME = config["email"]["username"]
     SMTP_PASSWORD = config["email"]["password"]
 
-    SEND_TEST_EMAIL = (config["email"]["send_test_email"] if "send_test_email" in config["email"] else False)
+    SEND_TEST_EMAIL = config["email"]["send_test_email"] if "send_test_email" in config["email"] else False
 
     monitored_services = []
 
