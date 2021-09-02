@@ -106,14 +106,13 @@ class DNSService(Service):
         try:
             sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             sock.sendto(b"\xAA\xAA\x01\x00\x00\x01\x00\x00\x00\x00\x00\x00"
-                        b"\x0a\x6d\x69\x6e\x75\x74\x65\x70\x69\x6e\x67\x04\x74\x65\x73\x74"
+                        b"\x0a\x6d\x69\x6e\x75\x74\x65\x70\x69\x6e\x67\x04\x74\x65\x73\x74"  # minuteping.test
                         b"\x00\x00\x01\x00\x01", (self.HOST, 53))
             sock.settimeout(self.TIMEOUT)
             result = sock.recvfrom(4096)[0]
             sock.close()
-            # TODO accept NXDOMAIN responses
-            # Checks if response has same ID as request, no errors reported and 1 question 1 answer
-            return result[0:2] == b"\xAA\xAA" and result[3] & 0x0F == 0 and result[5] == result[7] == 1
+            # Checks if response has same ID as request and if RCODE=3 (NXDOMAIN)
+            return result[0:2] == b"\xAA\xAA" and result[3] & 0x0F == 3
         except OSError:
             return False
 

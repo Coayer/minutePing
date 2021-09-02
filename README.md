@@ -59,11 +59,11 @@ Click the terminal widget and press `CTRL+D` to reboot.
 
 ## Configuration
 
-MinutePing uses a JSON configuration file called `config.json` for its settings. For information on each option, refer to the sections below.
+MinutePing uses a JSON configuration file called `config.json`. For information on each option, refer to the sections below.
 
-See the `sample_config.json` file for a starter configuration file. Either copy-paste into a new file called `config.json` or rename to `config.json` and fill in the blanks. 
+See `sample_config.json` for a starter configuration file. Either copy-paste into a new file called `config.json` or rename to `config.json` and fill in the blanks. 
 
-To test the email configuration is working, set the `send_test_email` option to `true` in the `email` section. This will send a test email using the settings from the `configuration.json` file when MinutePing starts. It may be marked as spam, so refer to your email provider's documentation on whitelisting email addresses. 
+To test the email configuration, set the `send_test_email` option to `true` in the `email` section. This will send a test email using the settings from `configuration.json` when MinutePing starts. MinutePing's emails may be marked as spam, so refer to your email provider's documentation on whitelisting email addresses. 
 
 ### Configuration file format
 
