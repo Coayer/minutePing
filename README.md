@@ -65,7 +65,7 @@ See `sample_config.json` for a starter configuration file. Either copy-paste int
 
 To test the email configuration, set the `send_test_email` option to `true` in the `email` section. This will send a test email using the settings from `configuration.json` when minutePing starts. minutePing's emails may be marked as spam, so refer to your email provider's documentation on whitelisting email addresses. 
 
-### Configuration file format
+### Example configuration file format
 
 ```json
 {
