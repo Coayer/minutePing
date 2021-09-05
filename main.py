@@ -1,12 +1,13 @@
 from json import load
 from sys import exit
 from machine import RTC
-import ntptime
+import ntp
 import umail
 import uping
 import network
 import socket
 import time
+import uasyncio
 
 VALID_SERVICE_TYPES = ["icmp", "http", "dns"]
 DEFAULT_CHECK_INTERVAL = 60
@@ -23,45 +24,40 @@ class Service:
         self.timeout = (service_config["timeout"] if "timeout" in service_config else DEFAULT_TIMEOUT)
         self.notify_after_failures = (service_config["notify_after_failures"] if "notify_after_failures" in service_config
                                       else DEFAULT_NOTIFY_AFTER_FAILURES)
-
-        self.last_checked = 0
-
         self.failures = 0
         self.notified = False
 
         print("Initialized service {} {}".format(service_config["name"], service_config["host"]))
 
-    def check(self):
-        self.last_checked = time.time()
+    async def monitor(self):
         print("Checking service {}...".format(self.name))
 
-        if self.test_service():
-            print("Success")
-            self.failures = 0
+        while True:
+            online = await self.test_service()
 
-            if self.notified:
-                notify(self, "online")
-                self.notified = False
+            if online:
+                print("Online")
+                self.failures = 0
 
-        else:
-            print("Failure")
-            self.failures += 1
+                if self.notified:
+                    await notify(self, "online")
+                    self.notified = False
 
-            if self.failures >= self.notify_after_failures and not self.notified:
-                print(self.name + " reached failure threshold!")
-                self.notified = notify(self, "offline")
+            else:
+                print("Offline")
+                self.failures += 1
 
-    def test_service(self):
+                if self.failures >= self.notify_after_failures and not self.notified:
+                    print(self.name + " reached failure threshold!")
+                    self.notified = await notify(self, "offline")
+
+            await uasyncio.sleep_ms(self.check_interval * 1000)
+
+    async def test_service(self):
         return True
-
-    def get_last_checked(self):
-        return self.last_checked
 
     def get_name(self):
         return self.name
-
-    def get_check_interval(self):
-        return self.check_interval
 
     def get_number_of_failures(self):
         return self.failures
@@ -117,13 +113,13 @@ class DNSService(Service):
             return False
 
 
-def set_time():
+async def set_time():
     print("Fetching NTP time...")
 
     number_ntp_fetches = 10  # ntp fetching is temperamental
     for ntp_fetch in range(number_ntp_fetches):
         try:
-            ntptime.settime()
+            await ntp.settime()
             break
         except (OSError, OverflowError):
             if ntp_fetch == number_ntp_fetches - 1:
@@ -133,8 +129,8 @@ def set_time():
                 pass
 
 
-def notify(service_object, status):
-    set_time()
+async def notify(service_object, status):
+    await set_time()
 
     minutes_since_failure = service_object.get_check_interval() * service_object.get_number_of_failures() / 60
     minutes_since_failure = int(minutes_since_failure) if int(minutes_since_failure) == minutes_since_failure \
@@ -162,6 +158,17 @@ def notify(service_object, status):
     except (AssertionError, OSError) as e:
         print("Failed to send email notification: " + e.args[0])
         return False
+
+
+async def main():
+    global monitored_services
+
+    for service in monitored_services:
+        uasyncio.create_task(service.monitor())
+
+    while True:
+        # wdt.feed()?
+        await uasyncio.sleep_ms(1000)
 
 
 with open("config.json", "r") as config_file:
@@ -235,7 +242,4 @@ rtc = RTC()
 if send_test_email:
     notify(Service({"name": "TEST EMAIL SERVICE", "host": "email.test"}), "BEING TESTED")
 
-while True:
-    for service in monitored_services:
-        if time.time() - service.get_last_checked() > service.get_check_interval():
-            service.check()
+uasyncio.run(main())
