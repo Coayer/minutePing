@@ -91,7 +91,7 @@ class ICMPService(Service):
         Service.__init__(self, service_config)
 
     def test_service(self):
-        return uping.ping(self.host, count=1, timeout=self.timeout * 1000, quiet=True)[1] == 1
+        return uping.ping(self.host, timeout=self.timeout * 1000)
 
 
 class DNSService(Service):

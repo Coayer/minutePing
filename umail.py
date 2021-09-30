@@ -22,6 +22,7 @@ class SMTP:
         sock = usocket.socket(usocket.AF_INET, usocket.SOCK_STREAM)
         sock.settimeout(DEFAULT_TIMEOUT)
         sock.connect(addr)
+
         if ssl:
             sock = ussl.wrap_socket(sock)
 
@@ -52,8 +53,8 @@ class SMTP:
         resp = []
         next = True
         while next:
-            code = self.reader.read(3)
-            next = self.reader.read(1) == b'-'
+            code = await self.reader.read(3)
+            next = await self.reader.read(1) == b'-'
             resp.append(await self.reader.readline().strip().decode())
         return int(code), resp
 
