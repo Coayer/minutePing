@@ -19,15 +19,15 @@ class SMTP:
         self.username = username
 
         addr = usocket.getaddrinfo(host, port)[0][-1]
-        sock = usocket.socket(usocket.AF_INET, usocket.SOCK_STREAM)
-        sock.settimeout(DEFAULT_TIMEOUT)
-        sock.connect(addr)
+        self.sock = usocket.socket(usocket.AF_INET, usocket.SOCK_STREAM)
+        self.sock.settimeout(DEFAULT_TIMEOUT)
+        self.sock.connect(addr)
 
         if ssl:
-            sock = ussl.wrap_socket(sock)
+            self.sock = ussl.wrap_socket(self.sock)
 
-        self.reader = uasyncio.StreamReader(sock)
-        self.writer = uasyncio.StreamWriter(sock, {})
+        self.reader = uasyncio.StreamReader(self.sock)
+        self.writer = uasyncio.StreamWriter(self.sock, {})
 
         code = int(await self.reader.read(3))
         await self.reader.readline()
@@ -39,9 +39,9 @@ class SMTP:
         if CMD_STARTTLS in resp:
             code, resp = await self.cmd(CMD_STARTTLS)
             assert code==220, 'start tls failed %d, %s' % (code, resp)
-            sock = ussl.wrap_socket(sock)
-            self.reader = uasyncio.StreamReader(sock)
-            self.writer = uasyncio.StreamWriter(sock, {})
+            self.sock = ussl.wrap_socket(self.sock)
+            self.reader = uasyncio.StreamReader(self.sock)
+            self.writer = uasyncio.StreamWriter(self.sock, {})
 
         if username and password:
             await self.login(username, password)
@@ -118,5 +118,8 @@ class SMTP:
 
     def quit(self):
         await self.cmd("QUIT")
+
+        self.sock.close()
+        self.reader.close()
         self.writer.close()
         await self.writer.wait_closed()

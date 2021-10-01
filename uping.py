@@ -27,7 +27,14 @@ def checksum(data):
     cs = ~cs & 0xffff
     return cs
 
-async def ping(host, timeout=5000, size=64):
+async def ping(host, timeout=5, size=64):
+    import utime
+    import uselect
+    import uctypes
+    import usocket
+    import ustruct
+    import uos
+
     # prepare packet
     assert size >= 16, "pkt size too small"
     pkt = b'Q'*size
@@ -48,15 +55,18 @@ async def ping(host, timeout=5000, size=64):
 
     # init socket
     sock = usocket.socket(usocket.AF_INET, usocket.SOCK_RAW, 1)
-    sock.settimeout(timeout/1000)
-    addr = usocket.getaddrinfo(host, 1)[0][-1][0] # ip address
+    sock.settimeout(timeout)
+
+    try:
+        addr = usocket.getaddrinfo(host, 1)[0][-1][0] # ip address
+    except IndexError:
+        not quiet and print("Could not determine the address of", host)
+        return False
     sock.connect((addr, 1))
 
     reader = uasyncio.StreamReader(sock)
     writer = uasyncio.StreamWriter(sock, {})
 
-    # send packet
-    h.checksum = 0
     h.seq = 0
     h.timestamp = utime.ticks_us()
     h.checksum = checksum(pkt)
@@ -64,12 +74,22 @@ async def ping(host, timeout=5000, size=64):
     writer.write(pkt)
     await writer.drain()
 
-    resp = await reader.read(4096)
+    try:
+        resp = await reader.read(size)
+    except OSError as e:
+        if e.errno == 110:
+            return False
+        else:
+            raise
+
     resp_mv = memoryview(resp)
     h2 = uctypes.struct(uctypes.addressof(resp_mv[20:]), pkt_desc, uctypes.BIG_ENDIAN)
-    seq = h2.seq
 
+    sock.close()
+    reader.close()
+    await reader.wait_closed()
     writer.close()
     await writer.wait_closed()
 
-    return h2.type==0 and h2.id==h.id and seq==0 # 0: ICMP_ECHO_REPLY
+    return h2.type==0 and h2.id==h.id and h2.seq==0
+

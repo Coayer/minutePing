@@ -19,11 +19,11 @@ sudo usermod -aG dialout $USER  # user needs dialout permissions or root
 
 # might need to adjust path from /dev/ttyUSB0
 esptool.py --port /dev/ttyUSB0 erase_flash
-esptool.py --port /dev/ttyUSB0 --baud 460800 write\_flash --flash\_size=detect 0 esp8266-20210618-v1.16.bin # might need to change firmware file path and baud rate
+esptool.py --port /dev/ttyUSB0 --baud 460800 write\_flash --flash\_size=detect 0 esp8266-*.bin # might need to change firmware file path and baud rate
 
 rshell
 connect serial /dev/ttyUSB0
-cp main.py umail.py uping.py config.json /pyboard
+cp main.py umail.py uping.py ntp.py config.json /pyboard
 ```
 
 To enable remote access, set up the MicroPython WebREPL while inside an rshell REPL prompt:

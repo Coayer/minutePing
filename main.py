@@ -14,7 +14,12 @@ DEFAULT_CHECK_INTERVAL = 60
 DEFAULT_TIMEOUT = 1
 DEFAULT_NOTIFY_AFTER_FAILURES = 3
 
-#TODO refactor into other file
+#TODO refactor into other files
+#TODO add .wait_closed() for readers
+#TODO add exception catches for stream reads OSError.ETIMEDOUT see uping
+#TODO add exception catches for getaddr incase dns fails
+#TODO test watchdog timer
+
 class Service:
     def __init__(self, service_config):
         self.name = service_config["name"]
@@ -36,7 +41,7 @@ class Service:
             online = await self.test_service()
 
             if online:
-                print("Online")
+                print(self.name + " online")
                 self.failures = 0
 
                 if self.notified:
@@ -44,7 +49,7 @@ class Service:
                     self.notified = False
 
             else:
-                print("Offline")
+                print(self.name + " offline")
                 self.failures += 1
 
                 if self.failures >= self.notify_after_failures and not self.notified:
@@ -74,13 +79,24 @@ class HTTPService(Service):
         else:
             self.path = '/'
 
-    def test_service(self):
-        addr = socket.getaddrinfo(self.host, self.port)[0][-1]
-        s = socket.socket()
-        s.connect(addr)
-        s.send(bytes("GET /{} HTTP/1.0\r\nHost: {}\r\n\r\n".format(self.path, self.host), "utf-8"))
-        data = s.recv(15)   # will not work with HTTP versions >= 10.0
-        s.close()
+    async def test_service(self):
+        sock = socket.socket(usocket.AF_INET, usocket.SOCK_STREAM)
+        sock.settimeout(self.timeout)
+        sock.connect((self.host, self.port))
+
+        reader = uasyncio.StreamReader(sock)
+        writer = uasyncio.StreamWriter(sock, {})
+
+        writer.write(bytes("GET /{} HTTP/1.0\r\nHost: {}\r\n\r\n".format(self.path, self.host), "utf-8"))
+        await writer.drain()
+
+        data = await reader.read(15)   # will not work with HTTP versions >= 10.0
+
+        sock.close()
+        reader.close()
+        writer.close()
+        await writer.wait_closed()
+
         response_code = str(data, "utf-8").split()[1]
         print("HTTP response: " + response_code)
         return response_code == "200"
@@ -90,23 +106,33 @@ class ICMPService(Service):
     def __init__(self, service_config):
         Service.__init__(self, service_config)
 
-    def test_service(self):
-        return uping.ping(self.host, timeout=self.timeout * 1000)
+    async def test_service(self):
+        return await uping.ping(self.host, timeout=self.timeout)
 
 
 class DNSService(Service):
     def __init__(self, service_config):
         Service.__init__(self, service_config)
 
-    def test_service(self):
+    async def test_service(self):
         try:
             sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            sock.sendto(b"\xAA\xAA\x01\x00\x00\x01\x00\x00\x00\x00\x00\x00"
+            sock.settimeout(self.timeout)
+            reader = uasyncio.StreamReader(sock)
+            writer = uasyncio.StreamWriter(sock, {})
+
+            writer.write(b"\xAA\xAA\x01\x00\x00\x01\x00\x00\x00\x00\x00\x00"
                         b"\x0a\x6d\x69\x6e\x75\x74\x65\x70\x69\x6e\x67\x04\x74\x65\x73\x74"  # minuteping.test
                         b"\x00\x00\x01\x00\x01", (self.host, 53))
-            sock.settimeout(self.timeout)
-            result = sock.recvfrom(4096)[0]
+            await writer.drain()
+
+            result = await reader.read(4096)
+
+            reader.close()
             sock.close()
+            writer.close()
+            await writer.wait_closed()
+
             # Checks if response has same ID as request and if RCODE=3 (NXDOMAIN)
             return result[0:2] == b"\xAA\xAA" and result[3] & 0x0F == 3
         except OSError:
@@ -116,7 +142,7 @@ class DNSService(Service):
 async def set_time():
     print("Fetching NTP time...")
 
-    number_ntp_fetches = 10  # ntp fetching is temperamental
+    number_ntp_fetches = 10  # ntp fetching is often temperamental
     for ntp_fetch in range(number_ntp_fetches):
         try:
             await ntp.settime()
@@ -144,14 +170,14 @@ async def notify(service_object, status):
         smtp = umail.SMTP(smtp_server, smtp_port, username=smtp_username, password=smtp_password, ssl=smtp_ssl_enabled)
         # to = RECIPIENT_EMAIL_ADDRESSES if type(RECIPIENT_EMAIL_ADDRESSES) == str else ", ".join(RECIPIENT_EMAIL_ADDRESSES)
         smtp.to(recipient_email_addresses)
-        smtp.send("From: minutePing <{}>\n"
+        await smtp.send("From: minutePing <{}>\n"
                   "Subject: Monitored service {} is {}\n\n"
                    "Current time: {:02d}:{:02d}:{:02d} {:02d}/{:02d}/{} UTC\n\n"
                    "Monitored service {} was detected as {} {} minutes ago.".format(smtp_username, service_object.get_name(), status,
                                                                                     current_time[4], current_time[5], current_time[6],
                                                                                     current_time[2], current_time[1], current_time[0],
                                                                                     service_object.get_name(), status, minutes_since_failure))
-        smtp.quit()
+        await smtp.quit()
 
         print("Email successfully sent")
         return True

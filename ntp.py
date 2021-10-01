@@ -1,4 +1,4 @@
-import usocket
+import socket
 import ustruct
 import uasyncio
 import machine
@@ -15,16 +15,24 @@ async def time():
     NTP_QUERY = bytearray(48)
     NTP_QUERY[0] = 0x1B
 
-    reader, writer = await uasyncio.open_connection(host, 123)
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    addr = socket.getaddrinfo(host, 123)[0][-1]
+    sock.settimeout(5)
+    sock.connect(addr)
+
+    reader = uasyncio.StreamReader(sock)
+    writer = uasyncio.StreamWriter(sock, {})
 
     try:
         writer.write(NTP_QUERY)
         await writer.drain()
-
-        msg = await reader.read(48)
+        msg = await reader.readexactly(48)
     finally:
         writer.close()
         await writer.wait_closed()
+        reader.close()
+        await reader.wait_closed()
+        sock.close()
 
     val = ustruct.unpack("!I", msg[40:44])[0]
     return val - NTP_DELTA
