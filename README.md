@@ -36,6 +36,8 @@ repl
 
 Then visit http://micropython.org/webrepl/ and enter your board's IP address and WebREPL password.
 
+While minutePing is checking services, the LED on the ESP8266 will blink. If the LED is stuck on or doesn't blink, reset the board using RST (a button on NodeMCU).
+
 ## Updating
 
 #### MicroPython firmware

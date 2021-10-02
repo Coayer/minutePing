@@ -12,6 +12,7 @@ import uctypes
 import usocket
 import ustruct
 import uos
+import uselect
 
 # @data: bytes
 def checksum(data):
@@ -28,13 +29,6 @@ def checksum(data):
     return cs
 
 async def ping(host, timeout=5, size=64):
-    import utime
-    import uselect
-    import uctypes
-    import usocket
-    import ustruct
-    import uos
-
     # prepare packet
     assert size >= 16, "pkt size too small"
     pkt = b'Q'*size
@@ -75,7 +69,7 @@ async def ping(host, timeout=5, size=64):
     await writer.drain()
 
     try:
-        resp = await reader.read(size)
+        resp = await reader.readexactly(size)
     except OSError as e:
         if e.errno == 110:
             return False

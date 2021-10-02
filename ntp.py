@@ -39,7 +39,19 @@ async def time():
 
 
 # There's currently no timezone support in MicroPython, and the RTC is set in UTC time.
-async def settime():
-    t = await time()
-    tm = utime.gmtime(t)
-    machine.RTC().datetime((tm[0], tm[1], tm[2], tm[6] + 1, tm[3], tm[4], tm[5], 0))
+async def set_time():
+    number_ntp_fetches = 10
+
+    for ntp_fetch_attempt in range(number_ntp_fetches):
+        try:
+            t = await time()
+            tm = utime.gmtime(t)
+            machine.RTC().datetime((tm[0], tm[1], tm[2], tm[6] + 1, tm[3], tm[4], tm[5], 0))
+            return
+        except OSError as e:
+            if e.errno != 110:
+                raise
+
+        if ntp_fetch_attempt == number_ntp_fetches - 1:
+            print("Failed to set NTP time")
+            return False

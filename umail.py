@@ -3,6 +3,7 @@
 # License: MIT
 import usocket
 import uasyncio
+import ussl
 
 DEFAULT_TIMEOUT = 10 # sec
 LOCAL_DOMAIN = '127.0.0.1'
@@ -14,8 +15,22 @@ AUTH_PLAIN = 'PLAIN'
 AUTH_LOGIN = 'LOGIN'
 
 class SMTP:
-    def __init__(self, host, port, ssl=False, username=None, password=None):
-        import ussl
+    def __init__(self):
+        pass
+
+    async def cmd(self, cmd_str):
+        self.writer.write('%s\r\n' % cmd_str)
+        await self.writer.drain()
+
+        resp = []
+        next = True
+        while next:
+            code = await self.reader.readexactly(3)
+            next = await self.reader.readexactly(1) == b'-'
+            resp.append(await self.reader.readline().strip().decode())
+        return int(code), resp
+
+    async def login(self, host, port, username, password, ssl=False):
         self.username = username
 
         addr = usocket.getaddrinfo(host, port)[0][-1]
@@ -29,37 +44,20 @@ class SMTP:
         self.reader = uasyncio.StreamReader(self.sock)
         self.writer = uasyncio.StreamWriter(self.sock, {})
 
-        code = int(await self.reader.read(3))
+        code = int(await self.reader.readexactly(3))
         await self.reader.readline()
 
-        assert code==220, 'cant connect to server'
+        assert code == 220, 'cant connect to server'
 
         code, resp = await self.cmd(CMD_EHLO + ' ' + LOCAL_DOMAIN)
-        assert code==250, '%d' % code
+        assert code == 250, '%d' % code
         if CMD_STARTTLS in resp:
             code, resp = await self.cmd(CMD_STARTTLS)
-            assert code==220, 'start tls failed %d, %s' % (code, resp)
+            assert code == 220, 'start tls failed %d, %s' % (code, resp)
             self.sock = ussl.wrap_socket(self.sock)
             self.reader = uasyncio.StreamReader(self.sock)
             self.writer = uasyncio.StreamWriter(self.sock, {})
 
-        if username and password:
-            await self.login(username, password)
-
-    async def cmd(self, cmd_str):
-        self.writer.write('%s\r\n' % cmd_str)
-        await self.writer.drain()
-
-        resp = []
-        next = True
-        while next:
-            code = await self.reader.read(3)
-            next = await self.reader.read(1) == b'-'
-            resp.append(await self.reader.readline().strip().decode())
-        return int(code), resp
-
-    async def login(self, username, password):
-        self.username = username
         code, resp = await self.cmd(CMD_EHLO + ' ' + LOCAL_DOMAIN)
         assert code==250, '%d, %s' % (code, resp)
 
@@ -83,7 +81,7 @@ class SMTP:
         assert code==235 or code==503, 'auth error %d, %s' % (code, resp)
         return code, resp
 
-    def to(self, addrs, mail_from=None):
+    async def to(self, addrs, mail_from=None):
         mail_from = self.username if mail_from==None else mail_from
         code, resp = await self.cmd(CMD_EHLO + ' ' + LOCAL_DOMAIN)
         assert code==250, '%d' % code
@@ -121,5 +119,6 @@ class SMTP:
 
         self.sock.close()
         self.reader.close()
+        await self.reader.wait_closed()
         self.writer.close()
         await self.writer.wait_closed()
