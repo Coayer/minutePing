@@ -17,7 +17,6 @@ async def time():
 
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     addr = socket.getaddrinfo(host, 123)[0][-1]
-    sock.settimeout(5)
     sock.connect(addr)
 
     reader = uasyncio.StreamReader(sock)
@@ -40,17 +39,20 @@ async def time():
 
 # There's currently no timezone support in MicroPython, and the RTC is set in UTC time.
 async def set_time():
-    number_ntp_fetches = 10
+    number_ntp_fetches = 5
 
     for ntp_fetch_attempt in range(number_ntp_fetches):
         try:
-            t = await time()
+            t = await uasyncio.wait_for(time(), 5)
             tm = utime.gmtime(t)
             machine.RTC().datetime((tm[0], tm[1], tm[2], tm[6] + 1, tm[3], tm[4], tm[5], 0))
             return
         except OSError as e:
             if e.errno != 110:
                 raise
+        except uasyncio.TimeoutError:
+            print("NTP fetch timed out")
+            pass
 
         if ntp_fetch_attempt == number_ntp_fetches - 1:
             print("Failed to set NTP time")

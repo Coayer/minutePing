@@ -17,6 +17,7 @@
     "smtp_server": "",
     "port": 587,
     "username": "",
-    "password": ""
+    "password": "",
+    "send_test_email": true
   }
 }

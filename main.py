@@ -9,8 +9,8 @@ import socket
 import time
 import uasyncio
 
-#TODO umail might not be running asynchronously
-#TODO add exception catches for getaddr incase dns fails
+#TODO fix ICMP failing to expire timeout on unreachable IP socket read
+#TODO add exception catches for getaddr timeout incase dns fails
 #TODO test watchdog timer (coroutines should crash whole program thanks to global exception handler)
 
 
@@ -81,28 +81,35 @@ class HTTPService(Service):
         address = socket.getaddrinfo(self.host, self.port)[0][-1]
 
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.settimeout(self.timeout)
         sock.connect(address)
 
         reader = uasyncio.StreamReader(sock)
         writer = uasyncio.StreamWriter(sock, {})
 
-        writer.write(bytes("GET /{} HTTP/1.0\r\nHost: {}\r\n\r\n".format(self.path, self.host), "utf-8"))
-        await writer.drain()
-
         try:
-            data = await reader.read(15)   # will not work with HTTP versions >= 10.0
+            writer.write(bytes("GET /{} HTTP/1.0\r\nHost: {}\r\n\r\n".format(self.path, self.host), "utf-8"))
+            await uasyncio.wait_for(writer.drain(), self.timeout)
+
+            data = await uasyncio.wait_for(reader.read(15), self.timeout)   # 15B will not work with HTTP versions >= 10
+
+            sock.close()
+            reader.close()
+            await reader.wait_closed()
+            writer.close()
+            await writer.wait_closed()
         except OSError as e:
             if e.errno == 110:
                 return False
             else:
                 raise
-
-        sock.close()
-        reader.close()
-        await reader.wait_closed()
-        writer.close()
-        await writer.wait_closed()
+        except uasyncio.TimeoutError:
+            return False
+        finally:
+            sock.close()
+            reader.close()
+            await reader.wait_closed()
+            writer.close()
+            await writer.wait_closed()
 
         response_code = str(data, "utf-8").split()[1]
         return response_code == "200"
@@ -123,30 +130,33 @@ class DNSService(Service):
     async def test_service(self):
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         address = socket.getaddrinfo(self.host, 53)[0][-1]
-        sock.settimeout(self.timeout)
         sock.connect(address)
 
         reader = uasyncio.StreamReader(sock)
         writer = uasyncio.StreamWriter(sock, {})
 
-        writer.write(b"\xAA\xAA\x01\x00\x00\x01\x00\x00\x00\x00\x00\x00"
-                     b"\x0a\x6d\x69\x6e\x75\x74\x65\x70\x69\x6e\x67\x04\x74\x65\x73\x74"  # minuteping.test
-                     b"\x00\x00\x01\x00\x01")
-        await writer.drain()
+
 
         try:
-            result = await reader.read(8)
+            writer.write(b"\xAA\xAA\x01\x00\x00\x01\x00\x00\x00\x00\x00\x00"
+                         b"\x0a\x6d\x69\x6e\x75\x74\x65\x70\x69\x6e\x67\x04\x74\x65\x73\x74"  # minuteping.test
+                         b"\x00\x00\x01\x00\x01")
+            await uasyncio.wait_for(writer.drain(), self.timeout)
+
+            result = await uasyncio.wait_for(reader.read(8), self.timeout)
         except OSError as e:
             if e.errno == 110:
                 return False
             else:
                 raise
-
-        sock.close()
-        reader.close()
-        await reader.wait_closed()
-        writer.close()
-        await writer.wait_closed()
+        except uasyncio.TimeoutError:
+            return False
+        finally:
+            sock.close()
+            reader.close()
+            await reader.wait_closed()
+            writer.close()
+            await writer.wait_closed()
 
         # Checks if response has same ID as request and if RCODE=3 (NXDOMAIN)
         return result[0:2] == b"\xAA\xAA" and result[3] & 0x0F == 3
@@ -179,7 +189,7 @@ async def notify(service_object, status):
 
         print("Email successfully sent")
         return True
-    except (AssertionError, OSError) as e:
+    except (AssertionError, OSError, uasyncio.TimeoutError) as e:
         print("Failed to send email notification: " + str(e.args[0]))
         return False
 
@@ -254,6 +264,8 @@ except KeyError as e:
     print("Missing required configuration value " + e.args[0])
     sys.exit(1)
 
+led = Pin(2, Pin.OUT, value=1)
+
 print("Activating Wi-Fi...")
 ap_if = network.WLAN(network.AP_IF)
 ap_if.active(False)
@@ -267,16 +279,16 @@ if static_address is not None:
 
 print("Connecting to Wi-Fi network...")
 sta_if.connect(ssid, wifi_password)
+led(0)
 while not sta_if.isconnected():
     pass
+led(1)
 
 print("Starting real-time clock...")
 rtc = RTC()
 
 if send_test_email:
     notify(Service({"name": "TEST EMAIL SERVICE", "host": "email.test"}), "BEING TESTED")
-
-led = Pin(2, Pin.OUT, value=1)
 
 try:
     uasyncio.run(main())

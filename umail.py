@@ -5,7 +5,7 @@ import usocket
 import uasyncio
 import ussl
 
-DEFAULT_TIMEOUT = 10 # sec
+TIMEOUT = 5 # sec
 LOCAL_DOMAIN = '127.0.0.1'
 CMD_EHLO = 'EHLO'
 CMD_STARTTLS = 'STARTTLS'
@@ -25,9 +25,9 @@ class SMTP:
         resp = []
         next = True
         while next:
-            code = await self.reader.readexactly(3)
-            next = await self.reader.readexactly(1) == b'-'
-            resp.append(await self.reader.readline().strip().decode())
+            code = await uasyncio.wait_for(self.reader.readexactly(3), TIMEOUT)
+            next = await uasyncio.wait_for(self.reader.readexactly(1), TIMEOUT) == b'-'
+            resp.append(await uasyncio.wait_for(self.reader.readline().strip().decode(), TIMEOUT))
         return int(code), resp
 
     async def login(self, host, port, username, password, ssl=False):
@@ -35,7 +35,6 @@ class SMTP:
 
         addr = usocket.getaddrinfo(host, port)[0][-1]
         self.sock = usocket.socket(usocket.AF_INET, usocket.SOCK_STREAM)
-        self.sock.settimeout(DEFAULT_TIMEOUT)
         self.sock.connect(addr)
 
         if ssl:

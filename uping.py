@@ -49,7 +49,6 @@ async def ping(host, timeout=5, size=64):
 
     # init socket
     sock = usocket.socket(usocket.AF_INET, usocket.SOCK_RAW, 1)
-    sock.settimeout(timeout)
 
     try:
         addr = usocket.getaddrinfo(host, 1)[0][-1][0] # ip address
@@ -65,25 +64,28 @@ async def ping(host, timeout=5, size=64):
     h.timestamp = utime.ticks_us()
     h.checksum = checksum(pkt)
 
-    writer.write(pkt)
-    await writer.drain()
-
     try:
-        resp = await reader.readexactly(size)
+        writer.write(pkt)
+        await uasyncio.wait_for(writer.drain(), timeout)
+        print("3ere")
+        resp = await uasyncio.wait_for(reader.readexactly(size), timeout)
+        print("There")
     except OSError as e:
         if e.errno == 110:
             return False
         else:
             raise
+    except uasyncio.TimeoutError:
+        return False
+    finally:
+        sock.close()
+        reader.close()
+        await reader.wait_closed()
+        writer.close()
+        await writer.wait_closed()
 
     resp_mv = memoryview(resp)
     h2 = uctypes.struct(uctypes.addressof(resp_mv[20:]), pkt_desc, uctypes.BIG_ENDIAN)
-
-    sock.close()
-    reader.close()
-    await reader.wait_closed()
-    writer.close()
-    await writer.wait_closed()
 
     return h2.type==0 and h2.id==h.id and h2.seq==0
 
