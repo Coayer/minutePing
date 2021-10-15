@@ -6,10 +6,9 @@ import umail
 import uping
 import network
 import socket
-import time
 import uasyncio
 
-#TODO fix ICMP failing to expire timeout on unreachable IP socket read
+#TODO fix email
 #TODO add exception catches for getaddr timeout incase dns fails
 #TODO test watchdog timer (coroutines should crash whole program thanks to global exception handler)
 
@@ -19,7 +18,7 @@ class Service:
         self.name = service_config["name"]
         self.host = service_config["host"]
         self.check_interval = (service_config["check_interval"] if "check_interval" in service_config else 60)
-        self.timeout = (service_config["timeout"] if "timeout" in service_config else 1)
+        self.timeout = (service_config["timeout"] if "timeout" in service_config else 5)
         self.notify_after_failures = (service_config["notify_after_failures"] if "notify_after_failures" in service_config
                                       else 3)
         self.failures = 0
@@ -70,6 +69,7 @@ class HTTPService(Service):
     def __init__(self, service_config):
         Service.__init__(self, service_config)
         self.port = (service_config["port"] if "port" in service_config else 80)
+        self.response_code = (str(service_config["response_code"]) if "response_code" in service_config else "200")
 
         split = self.host.split('/', 1)
         if len(split) == 2:
@@ -81,7 +81,13 @@ class HTTPService(Service):
         address = socket.getaddrinfo(self.host, self.port)[0][-1]
 
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.connect(address)
+        sock.setblocking(False)
+
+        try:
+            sock.connect(address)
+        except OSError as e:
+            if e.errno != 115:
+                raise
 
         reader = uasyncio.StreamReader(sock)
         writer = uasyncio.StreamWriter(sock, {})
@@ -91,12 +97,6 @@ class HTTPService(Service):
             await uasyncio.wait_for(writer.drain(), self.timeout)
 
             data = await uasyncio.wait_for(reader.read(15), self.timeout)   # 15B will not work with HTTP versions >= 10
-
-            sock.close()
-            reader.close()
-            await reader.wait_closed()
-            writer.close()
-            await writer.wait_closed()
         except OSError as e:
             if e.errno == 110:
                 return False
@@ -112,7 +112,7 @@ class HTTPService(Service):
             await writer.wait_closed()
 
         response_code = str(data, "utf-8").split()[1]
-        return response_code == "200"
+        return self.response_code == response_code
 
 
 class ICMPService(Service):
@@ -130,12 +130,16 @@ class DNSService(Service):
     async def test_service(self):
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         address = socket.getaddrinfo(self.host, 53)[0][-1]
-        sock.connect(address)
+        sock.setblocking(False)
+
+        try:
+            sock.connect(address)
+        except OSError as e:
+            if e.errno != 115:
+                raise
 
         reader = uasyncio.StreamReader(sock)
         writer = uasyncio.StreamWriter(sock, {})
-
-
 
         try:
             writer.write(b"\xAA\xAA\x01\x00\x00\x01\x00\x00\x00\x00\x00\x00"
@@ -215,6 +219,9 @@ async def main():
         # wdt.feed()?
         await uasyncio.sleep(1)
 
+led = Pin(2, Pin.OUT, value=1)
+led(0)
+
 with open("config.json", "r") as config_file:
     try:
         config = load(config_file)
@@ -264,7 +271,7 @@ except KeyError as e:
     print("Missing required configuration value " + e.args[0])
     sys.exit(1)
 
-led = Pin(2, Pin.OUT, value=1)
+del config  # only needed for config loading
 
 print("Activating Wi-Fi...")
 ap_if = network.WLAN(network.AP_IF)
@@ -279,16 +286,16 @@ if static_address is not None:
 
 print("Connecting to Wi-Fi network...")
 sta_if.connect(ssid, wifi_password)
-led(0)
 while not sta_if.isconnected():
     pass
-led(1)
 
 print("Starting real-time clock...")
 rtc = RTC()
 
 if send_test_email:
     notify(Service({"name": "TEST EMAIL SERVICE", "host": "email.test"}), "BEING TESTED")
+
+led(1)
 
 try:
     uasyncio.run(main())

@@ -36,23 +36,9 @@ repl
 
 Then visit http://micropython.org/webrepl/ and enter your board's IP address and WebREPL password.
 
-While minutePing is checking services, the LED on the ESP8266 will blink. If the LED is stuck on or doesn't blink, reset the board using RST (a button on NodeMCU).
+While minutePing is starting and while services are being checked, the LED on the ESP8266 will turn on. If the LED is stuck on or doesn't blink, power cycle or reset the board using RST.
 
-## Updating
-
-#### MicroPython firmware
-
-Follow the installation commands from the `esptool.py` commands onwards.
-
-#### minutePing or `config.json` via `rshell`:
-```bash
-git clone https://gitlab.com/coayer/minutePing.git
-rshell
-connect serial /dev/ttyUSB0
-cp minutePing/main.py /pyboard  # might also require an update to config.json
-```
-
-#### minutePing or `config.json` file via WebREPL
+#### Updating minutePing or `config.json` via WebREPL
 
 Follow the remote access setup above (under Installation) and visit http://micropython.org/webrepl/. 
 Enter your board's IP address and WebREPL password and upload the new files with the "Send a file" option.
@@ -85,8 +71,9 @@ To test the email configuration, set the `send_test_email` option to `true` in t
  - `host`: (Required) IP address or hostname (eg `9.9.9.9` or `www.google.com`). HTTP services can include a path (eg `www.google.com/about`)
  - `type`: (Required) Must be `http`, `dns` or `icmp` (ping)
  - `port`: (Optional) Specifies port for HTTP services. Defaults to `80`
+ - `response_code`: (Optional) Specifies response code to check against for HTTP services. Defaults to `200`
  - `check_interval`: (Optional) Time between checks in seconds. Defaults to `60`
- - `timeout`: (Optional) Timeout of request in seconds. Defaults to `1`
+ - `timeout`: (Optional) Timeout of request in seconds. Defaults to `5`
  - `notify_after_failures`: (Optional) Number of consecutive failures before service offline alert is sent. Defaults to `3`
 
 Example:
@@ -97,7 +84,8 @@ Example:
   "check_interval": 60,
   "type": "http",
   "port": 8080,
-  "host": "www.google.com",
+  "host": "www.google.com/minutePing",
+  "response_code": 404, 
   "timeout": 2,
   "notify_after_failures": 2
 }

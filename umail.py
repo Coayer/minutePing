@@ -27,7 +27,8 @@ class SMTP:
         while next:
             code = await uasyncio.wait_for(self.reader.readexactly(3), TIMEOUT)
             next = await uasyncio.wait_for(self.reader.readexactly(1), TIMEOUT) == b'-'
-            resp.append(await uasyncio.wait_for(self.reader.readline().strip().decode(), TIMEOUT))
+            response = await uasyncio.wait_for(self.reader.readline(), TIMEOUT)
+            resp.append(response.strip().decode())
         return int(code), resp
 
     async def login(self, host, port, username, password, ssl=False):
@@ -35,7 +36,13 @@ class SMTP:
 
         addr = usocket.getaddrinfo(host, port)[0][-1]
         self.sock = usocket.socket(usocket.AF_INET, usocket.SOCK_STREAM)
-        self.sock.connect(addr)
+        self.sock.setblocking(False)
+
+        try:
+            self.sock.connect(addr)
+        except OSError as e:
+            if e.errno != 115:
+                raise
 
         if ssl:
             self.sock = ussl.wrap_socket(self.sock)

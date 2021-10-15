@@ -47,15 +47,21 @@ async def ping(host, timeout=5, size=64):
     h.id[0:2] = uos.urandom(2)
     h.seq = 1
 
-    # init socket
-    sock = usocket.socket(usocket.AF_INET, usocket.SOCK_RAW, 1)
-
     try:
         addr = usocket.getaddrinfo(host, 1)[0][-1][0] # ip address
     except IndexError:
         not quiet and print("Could not determine the address of", host)
         return False
-    sock.connect((addr, 1))
+
+    # init socket
+    sock = usocket.socket(usocket.AF_INET, usocket.SOCK_RAW, 1)
+    sock.setblocking(False)
+
+    try:
+        sock.connect((addr, 1))
+    except OSError as e:
+        if e.errno != 115:
+            raise
 
     reader = uasyncio.StreamReader(sock)
     writer = uasyncio.StreamWriter(sock, {})
@@ -67,9 +73,7 @@ async def ping(host, timeout=5, size=64):
     try:
         writer.write(pkt)
         await uasyncio.wait_for(writer.drain(), timeout)
-        print("3ere")
         resp = await uasyncio.wait_for(reader.readexactly(size), timeout)
-        print("There")
     except OSError as e:
         if e.errno == 110:
             return False

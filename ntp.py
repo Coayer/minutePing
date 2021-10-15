@@ -17,7 +17,13 @@ async def time():
 
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     addr = socket.getaddrinfo(host, 123)[0][-1]
-    sock.connect(addr)
+    sock.setblocking(False)
+
+    try:
+        sock.connect(addr)
+    except OSError as e:
+        if e.errno != 115:
+            raise
 
     reader = uasyncio.StreamReader(sock)
     writer = uasyncio.StreamWriter(sock, {})
