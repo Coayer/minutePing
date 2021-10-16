@@ -8,9 +8,12 @@ import network
 import socket
 import uasyncio
 
-#TODO fix email
+#TODO fix webrepl
+#TODO uasyncio -> asyncio
 #TODO add exception catches for getaddr timeout incase dns fails
 #TODO test watchdog timer (coroutines should crash whole program thanks to global exception handler)
+#TODO replace upython ntptime with ntp
+#TODO remove AP activate in boot.py
 #TODO custom firmware builds
 
 class Service:
@@ -177,25 +180,25 @@ async def notify(service_object, status):
 
     print("Sending email notification...")
 
-    try:
-        smtp = umail.SMTP()
-        await smtp.login(smtp_server, smtp_port, smtp_username, smtp_password, ssl=smtp_ssl_enabled)
-        # to = RECIPIENT_EMAIL_ADDRESSES if type(RECIPIENT_EMAIL_ADDRESSES) == str else ", ".join(RECIPIENT_EMAIL_ADDRESSES)
-        await smtp.to(recipient_email_addresses)
-        await smtp.send("From: minutePing <{}>\n"
-                  "Subject: Monitored service {} is {}\n\n"
-                   "Current time: {:02d}:{:02d}:{:02d} {:02d}/{:02d}/{} UTC\n\n"
-                   "Monitored service {} was detected as {} {} minutes ago.".format(smtp_username, service_object.get_name(), status,
-                                                                                    current_time[4], current_time[5], current_time[6],
-                                                                                    current_time[2], current_time[1], current_time[0],
-                                                                                    service_object.get_name(), status, minutes_since_failure))
-        await smtp.quit()
+    # try:
+    smtp = umail.SMTP()
+    # to = RECIPIENT_EMAIL_ADDRESSES if type(RECIPIENT_EMAIL_ADDRESSES) == str else ", ".join(RECIPIENT_EMAIL_ADDRESSES)
+    await smtp.login(smtp_server, smtp_port, smtp_username, smtp_password)
+    await smtp.to(recipient_email_addresses)
+    await smtp.send("From: minutePing <{}>\n"
+              "Subject: Monitored service {} is {}\n\n"
+              "Current time: {:02d}:{:02d}:{:02d} {:02d}/{:02d}/{} UTC\n\n"
+              "Monitored service {} was detected as {} {} minutes ago.".format(smtp_username, service_object.get_name(), status,
+                                                                                current_time[4], current_time[5], current_time[6],
+                                                                                current_time[2], current_time[1], current_time[0],
+                                                                                service_object.get_name(), status, minutes_since_failure))
+    await smtp.quit()
 
-        print("Email successfully sent")
-        return True
-    except (AssertionError, OSError, uasyncio.TimeoutError) as e:
-        print("Failed to send email notification: " + str(e.args[0]))
-        return False
+    print("Email successfully sent")
+    return True
+    # except (AssertionError, OSError, uasyncio.TimeoutError) as e:
+    #     print("Failed to send email notification: " + str(e.args[0]))
+    #     return False
 
 
 # for debugging https://github.com/peterhinch/micropython-async/blob/master/v3/docs/TUTORIAL.md#22-coroutines-and-tasks
@@ -248,7 +251,6 @@ try:
     recipient_email_addresses = config["email"]["recipient_addresses"]
     smtp_server = config["email"]["smtp_server"]
     smtp_port = config["email"]["port"]
-    smtp_ssl_enabled = config["email"]["ssl"] if "ssl" in config["email"] else False
     smtp_username = config["email"]["username"]
     smtp_password = config["email"]["password"]
 
@@ -257,7 +259,7 @@ try:
     webrepl_enabled = "webrepl" in config
     if webrepl_enabled:
         with open("./webrepl_cfg.py", "w") as f:
-            f.write("PASS = {}\n".format(config["webrepl"]["password"]))
+            f.write("PASS = %r\n" % config["webrepl"]["password"])
 
     monitored_services = []
 
@@ -303,7 +305,7 @@ print("Starting real-time clock...")
 rtc = RTC()
 
 if send_test_email:
-    notify(Service({"name": "TEST EMAIL SERVICE", "host": "email.test"}), "BEING TESTED")
+    uasyncio.create_task(notify(Service({"name": "TEST EMAIL SERVICE", "host": "email.test"}), "BEING TESTED"))
 
 led(1)
 

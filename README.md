@@ -125,7 +125,6 @@ Example:
  - `recipient_addresses`: (Required) Email addresses to send alerts to. Can be single address or array
  - `smtp_server`: (Required) SMTP server
  - `port`: (Required) SMTP port
- - `ssl`: (Optional) Enables SSL. Defaults to `false`
  - `username`: (Required) SMTP username
  - `password`: (Required) SMTP password
  - `send_test_email`: (Optional) Will send a test email on boot. Defaults to `false`
@@ -137,7 +136,6 @@ Example:
   "recipient_addresses": "targetemail@domain.com",
   "smtp_server": "smtp.mail.com",
   "port": 587,
-  "ssl": true,
   "username": "me@mail.com",
   "password": "123456789"
 }

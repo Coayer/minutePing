@@ -3,7 +3,6 @@
 # License: MIT
 import usocket
 import uasyncio
-import ussl
 
 TIMEOUT = 5 # sec
 LOCAL_DOMAIN = '127.0.0.1'
@@ -20,18 +19,18 @@ class SMTP:
 
     async def cmd(self, cmd_str):
         self.writer.write('%s\r\n' % cmd_str)
-        await self.writer.drain()
+        await uasyncio.wait_for(self.writer.drain(), TIMEOUT)
 
         resp = []
         next = True
         while next:
             code = await uasyncio.wait_for(self.reader.readexactly(3), TIMEOUT)
             next = await uasyncio.wait_for(self.reader.readexactly(1), TIMEOUT) == b'-'
-            response = await uasyncio.wait_for(self.reader.readline(), TIMEOUT)
-            resp.append(response.strip().decode())
+            resp.append((await uasyncio.wait_for(self.reader.readline(), TIMEOUT)).strip().decode())
+
         return int(code), resp
 
-    async def login(self, host, port, username, password, ssl=False):
+    async def login(self, host, port, username, password):
         self.username = username
 
         addr = usocket.getaddrinfo(host, port)[0][-1]
@@ -44,25 +43,13 @@ class SMTP:
             if e.errno != 115:
                 raise
 
-        if ssl:
-            self.sock = ussl.wrap_socket(self.sock)
-
         self.reader = uasyncio.StreamReader(self.sock)
         self.writer = uasyncio.StreamWriter(self.sock, {})
 
-        code = int(await self.reader.readexactly(3))
-        await self.reader.readline()
+        code = int(await uasyncio.wait_for(self.reader.readexactly(3), TIMEOUT))
+        await uasyncio.wait_for(self.reader.readline(), TIMEOUT)
 
         assert code == 220, 'cant connect to server'
-
-        code, resp = await self.cmd(CMD_EHLO + ' ' + LOCAL_DOMAIN)
-        assert code == 250, '%d' % code
-        if CMD_STARTTLS in resp:
-            code, resp = await self.cmd(CMD_STARTTLS)
-            assert code == 220, 'start tls failed %d, %s' % (code, resp)
-            self.sock = ussl.wrap_socket(self.sock)
-            self.reader = uasyncio.StreamReader(self.sock)
-            self.writer = uasyncio.StreamWriter(self.sock, {})
 
         code, resp = await self.cmd(CMD_EHLO + ' ' + LOCAL_DOMAIN)
         assert code==250, '%d, %s' % (code, resp)
@@ -87,8 +74,8 @@ class SMTP:
         assert code==235 or code==503, 'auth error %d, %s' % (code, resp)
         return code, resp
 
-    async def to(self, addrs, mail_from=None):
-        mail_from = self.username if mail_from==None else mail_from
+    async def to(self, addrs):
+        mail_from = "minutePing@example.org"
         code, resp = await self.cmd(CMD_EHLO + ' ' + LOCAL_DOMAIN)
         assert code==250, '%d' % code
         code, resp = await self.cmd('MAIL FROM: <%s>' % mail_from)
@@ -108,16 +95,13 @@ class SMTP:
         assert code==354, 'data refused, %d, %s' % (code, resp)
         return code, resp
 
-    async def write(self, content):
-        self.writer.write(content)
-        await self.writer.drain()
-
     async def send(self, content=''):
         if content:
-            await self.write(content)
+            self.writer.write(content)
+            await uasyncio.wait_for(self.writer.drain(), TIMEOUT)
         self.writer.write('\r\n.\r\n') # the five letter sequence marked for ending
-        await self.writer.drain()
-        line = await self.reader.readline()
+        await uasyncio.wait_for(self.writer.drain(), TIMEOUT)
+        line = await uasyncio.wait_for(self.reader.readline(), TIMEOUT)
         return (int(line[:3]), line[4:].strip().decode())
 
     def quit(self):

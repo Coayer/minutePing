@@ -31,7 +31,7 @@ async def time():
     try:
         writer.write(NTP_QUERY)
         await writer.drain()
-        msg = await reader.readexactly(48)
+        msg = await reader.read(48)
     finally:
         writer.close()
         await writer.wait_closed()
