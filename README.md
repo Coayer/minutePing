@@ -38,10 +38,10 @@ Then visit http://micropython.org/webrepl/ and enter your board's IP address and
 
 While minutePing is starting and while services are being checked, the LED on the ESP8266 will turn on. If the LED is stuck on or doesn't blink, power cycle or reset the board using RST.
 
-#### Updating minutePing or `config.json` via WebREPL
+#### Updating `config.json` via WebREPL
 
-Follow the remote access setup above (under Installation) and visit http://micropython.org/webrepl/. 
-Enter your board's IP address and WebREPL password and upload the new files with the "Send a file" option.
+Visit http://micropython.org/webrepl/. 
+Enter your board's IP address and WebREPL password and upload the new `config.json` file with the "Send a file" option. To fetch the existing `config.json` file from the board, use the "Get a file" option.
 Click the terminal widget and press `CTRL+D` to reboot.
 
 
@@ -53,6 +53,8 @@ See `sample_config.json` for a starter configuration file. Either copy-paste int
 
 To test the email configuration, set the `send_test_email` option to `true` in the `email` section. This will send a test email using the settings from `configuration.json` when minutePing starts. minutePing's emails may be marked as spam, so refer to your email provider's documentation on whitelisting email addresses. 
 
+The WebREPL gives remote access to your minutePing installation. It can be used to check logs and modify the `config.json` file. The WebREPL will only be enabled if a JSON object exists in the configuration with the name `webrepl`.
+
 ### Example configuration file format
 
 ```json
@@ -61,7 +63,9 @@ To test the email configuration, set the `send_test_email` option to `true` in t
 
   "network": {...},
 
-  "email": {...}
+  "email": {...},
+   
+   "webrepl" : {...}
 }
 ```
 
@@ -136,5 +140,17 @@ Example:
   "ssl": true,
   "username": "me@mail.com",
   "password": "123456789"
+}
+```
+
+### WebREPL
+
+ - `password`: (Required) WebREPL access password
+
+Example:
+
+```json
+{
+   "password": "minuteping"
 }
 ```

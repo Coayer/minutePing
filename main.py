@@ -11,7 +11,7 @@ import uasyncio
 #TODO fix email
 #TODO add exception catches for getaddr timeout incase dns fails
 #TODO test watchdog timer (coroutines should crash whole program thanks to global exception handler)
-
+#TODO custom firmware builds
 
 class Service:
     def __init__(self, service_config):
@@ -254,6 +254,11 @@ try:
 
     send_test_email = config["email"]["send_test_email"] if "send_test_email" in config["email"] else False
 
+    webrepl_enabled = "webrepl" in config
+    if webrepl_enabled:
+        with open("./webrepl_cfg.py", "w") as f:
+            f.write("PASS = {}\n".format(config["webrepl"]["password"]))
+
     monitored_services = []
 
     for service_config in config["services"]:
@@ -288,6 +293,11 @@ print("Connecting to Wi-Fi network...")
 sta_if.connect(ssid, wifi_password)
 while not sta_if.isconnected():
     pass
+
+if webrepl_enabled:
+    print("Starting WebREPL...")
+    import webrepl
+    webrepl.start()
 
 print("Starting real-time clock...")
 rtc = RTC()
