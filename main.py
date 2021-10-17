@@ -1,17 +1,14 @@
 from json import load
-from machine import RTC, Pin
+from machine import RTC, Pin, WDT
 import sys
 import ntp
 import umail
 import uping
 import network
 import socket
-import uasyncio
+import uasyncio as asyncio
 
-#TODO fix webrepl
-#TODO uasyncio -> asyncio
 #TODO add exception catches for getaddr timeout incase dns fails
-#TODO test watchdog timer (coroutines should crash whole program thanks to global exception handler)
 #TODO replace upython ntptime with ntp
 #TODO remove AP activate in boot.py
 #TODO custom firmware builds
@@ -30,8 +27,6 @@ class Service:
         print("Initialized service {} {}".format(service_config["name"], service_config["host"]))
 
     async def monitor(self):
-        print("Checking service {}...".format(self.name))
-
         while True:
             led(0)
             online = await self.test_service()
@@ -53,7 +48,7 @@ class Service:
                     print(self.name + " reached failure threshold!")
                     self.notified = await notify(self, "offline")
 
-            await uasyncio.sleep(self.check_interval)
+            await asyncio.sleep(self.check_interval)
 
     async def test_service(self):
         return True
@@ -92,20 +87,20 @@ class HTTPService(Service):
             if e.errno != 115:
                 raise
 
-        reader = uasyncio.StreamReader(sock)
-        writer = uasyncio.StreamWriter(sock, {})
+        reader = asyncio.StreamReader(sock)
+        writer = asyncio.StreamWriter(sock, {})
 
         try:
             writer.write(bytes("GET /{} HTTP/1.0\r\nHost: {}\r\n\r\n".format(self.path, self.host), "utf-8"))
-            await uasyncio.wait_for(writer.drain(), self.timeout)
+            await asyncio.wait_for(writer.drain(), self.timeout)
 
-            data = await uasyncio.wait_for(reader.read(15), self.timeout)   # 15B will not work with HTTP versions >= 10
+            data = await asyncio.wait_for(reader.read(15), self.timeout)   # 15B will not work with HTTP versions >= 10
         except OSError as e:
             if e.errno == 110:
                 return False
             else:
                 raise
-        except uasyncio.TimeoutError:
+        except asyncio.TimeoutError:
             return False
         finally:
             sock.close()
@@ -141,22 +136,22 @@ class DNSService(Service):
             if e.errno != 115:
                 raise
 
-        reader = uasyncio.StreamReader(sock)
-        writer = uasyncio.StreamWriter(sock, {})
+        reader = asyncio.StreamReader(sock)
+        writer = asyncio.StreamWriter(sock, {})
 
         try:
             writer.write(b"\xAA\xAA\x01\x00\x00\x01\x00\x00\x00\x00\x00\x00"
                          b"\x0a\x6d\x69\x6e\x75\x74\x65\x70\x69\x6e\x67\x04\x74\x65\x73\x74"  # minuteping.test
                          b"\x00\x00\x01\x00\x01")
-            await uasyncio.wait_for(writer.drain(), self.timeout)
+            await asyncio.wait_for(writer.drain(), self.timeout)
 
-            result = await uasyncio.wait_for(reader.read(8), self.timeout)
+            result = await asyncio.wait_for(reader.read(8), self.timeout)
         except OSError as e:
             if e.errno == 110:
                 return False
             else:
                 raise
-        except uasyncio.TimeoutError:
+        except asyncio.TimeoutError:
             return False
         finally:
             sock.close()
@@ -180,25 +175,25 @@ async def notify(service_object, status):
 
     print("Sending email notification...")
 
-    # try:
-    smtp = umail.SMTP()
-    # to = RECIPIENT_EMAIL_ADDRESSES if type(RECIPIENT_EMAIL_ADDRESSES) == str else ", ".join(RECIPIENT_EMAIL_ADDRESSES)
-    await smtp.login(smtp_server, smtp_port, smtp_username, smtp_password)
-    await smtp.to(recipient_email_addresses)
-    await smtp.send("From: minutePing <{}>\n"
-              "Subject: Monitored service {} is {}\n\n"
-              "Current time: {:02d}:{:02d}:{:02d} {:02d}/{:02d}/{} UTC\n\n"
-              "Monitored service {} was detected as {} {} minutes ago.".format(smtp_username, service_object.get_name(), status,
-                                                                                current_time[4], current_time[5], current_time[6],
-                                                                                current_time[2], current_time[1], current_time[0],
-                                                                                service_object.get_name(), status, minutes_since_failure))
-    await smtp.quit()
+    try:
+        smtp = umail.SMTP()
+        # to = RECIPIENT_EMAIL_ADDRESSES if type(RECIPIENT_EMAIL_ADDRESSES) == str else ", ".join(RECIPIENT_EMAIL_ADDRESSES)
+        await smtp.login(smtp_server, smtp_port, smtp_username, smtp_password)
+        await smtp.to(recipient_email_addresses)
+        await smtp.send("From: minutePing <{}>\n"
+                        "Subject: Monitored service {} is {}\n\n"
+                        "Current time: {:02d}:{:02d}:{:02d} {:02d}/{:02d}/{} UTC\n\n"
+                        "Monitored service {} was detected as {} {} minutes ago.\n".format(smtp_username, service_object.get_name(), status,
+                                    current_time[4], current_time[5], current_time[6],
+                                    current_time[2], current_time[1], current_time[0],
+                                    service_object.get_name(), status, minutes_since_failure))
+        await smtp.quit()
 
-    print("Email successfully sent")
-    return True
-    # except (AssertionError, OSError, uasyncio.TimeoutError) as e:
-    #     print("Failed to send email notification: " + str(e.args[0]))
-    #     return False
+        print("Email successfully sent")
+        return True
+    except (AssertionError, OSError, asyncio.TimeoutError) as e:
+        print("Failed to send email notification: " + str(e.args[0]))
+        return False
 
 
 # for debugging https://github.com/peterhinch/micropython-async/blob/master/v3/docs/TUTORIAL.md#22-coroutines-and-tasks
@@ -206,7 +201,7 @@ def set_global_exception():
     def handle_exception(loop, context):
         sys.print_exception(context["exception"])
         sys.exit()
-    loop = uasyncio.get_event_loop()
+    loop = asyncio.get_event_loop()
     loop.set_exception_handler(handle_exception)
 
 
@@ -216,11 +211,11 @@ async def main():
     set_global_exception()
 
     for service in monitored_services:
-        uasyncio.create_task(service.monitor())
+        asyncio.create_task(service.monitor())
 
     while True:
-        # wdt.feed()?
-        await uasyncio.sleep(1)
+        wdt.feed()
+        await asyncio.sleep(1)
 
 led = Pin(2, Pin.OUT, value=1)
 led(0)
@@ -258,8 +253,9 @@ try:
 
     webrepl_enabled = "webrepl" in config
     if webrepl_enabled:
-        with open("./webrepl_cfg.py", "w") as f:
-            f.write("PASS = %r\n" % config["webrepl"]["password"])
+        webrepl_password = config["webrepl"]["password"]
+        if len(webrepl_password) < 4 or len(webrepl_password) > 9:
+            raise ValueError("WebREPL password must be between 4 and 9 characters")
 
     monitored_services = []
 
@@ -296,20 +292,25 @@ sta_if.connect(ssid, wifi_password)
 while not sta_if.isconnected():
     pass
 
+print("Connected with config " + str(sta_if.ifconfig()))
+
 if webrepl_enabled:
     print("Starting WebREPL...")
     import webrepl
-    webrepl.start()
+    webrepl.start(password=webrepl_password)
 
 print("Starting real-time clock...")
 rtc = RTC()
 
 if send_test_email:
-    uasyncio.create_task(notify(Service({"name": "TEST EMAIL SERVICE", "host": "email.test"}), "BEING TESTED"))
+    asyncio.create_task(notify(Service({"name": "TEST EMAIL SERVICE", "host": "email.test"}), "BEING TESTED"))
 
 led(1)
 
+print("Starting watchdog timer...")
+wdt = WDT()
+
 try:
-    uasyncio.run(main())
+    asyncio.run(main())
 finally:
-    uasyncio.new_event_loop()
+    asyncio.new_event_loop()

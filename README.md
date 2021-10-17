@@ -51,6 +51,8 @@ minutePing uses a JSON configuration file called `config.json`. For information 
 
 See `sample_config.json` for a starter configuration file. Either copy-paste into a new file called `config.json` or rename to `config.json` and fill in the blanks. 
 
+minutePing does not support SMTP over SSL/TLS. Use a free SMTP server with a dedicated account to avoid exposing your personal email account.
+
 To test the email configuration, set the `send_test_email` option to `true` in the `email` section. This will send a test email using the settings from `configuration.json` when minutePing starts. minutePing's emails may be marked as spam, so refer to your email provider's documentation on whitelisting email addresses. 
 
 The WebREPL gives remote access to your minutePing installation. It can be used to check logs and modify the `config.json` file. The WebREPL will only be enabled if a JSON object exists in the configuration with the name `webrepl`.
@@ -143,12 +145,12 @@ Example:
 
 ### WebREPL
 
- - `password`: (Required) WebREPL access password
+ - `password`: (Required) WebREPL access password. Must have length between 4 and 9 characters
 
 Example:
 
 ```json
 {
-   "password": "minuteping"
+   "password": "minute"
 }
 ```

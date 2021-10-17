@@ -2,7 +2,7 @@
 # Copyright (c) 2018 Shawwwn <shawwwn1@gmai.com>
 # License: MIT
 import usocket
-import uasyncio
+import uasyncio as asyncio
 
 TIMEOUT = 5 # sec
 LOCAL_DOMAIN = '127.0.0.1'
@@ -19,14 +19,14 @@ class SMTP:
 
     async def cmd(self, cmd_str):
         self.writer.write('%s\r\n' % cmd_str)
-        await uasyncio.wait_for(self.writer.drain(), TIMEOUT)
+        await asyncio.wait_for(self.writer.drain(), TIMEOUT)
 
         resp = []
         next = True
         while next:
-            code = await uasyncio.wait_for(self.reader.readexactly(3), TIMEOUT)
-            next = await uasyncio.wait_for(self.reader.readexactly(1), TIMEOUT) == b'-'
-            resp.append((await uasyncio.wait_for(self.reader.readline(), TIMEOUT)).strip().decode())
+            code = await asyncio.wait_for(self.reader.readexactly(3), TIMEOUT)
+            next = await asyncio.wait_for(self.reader.readexactly(1), TIMEOUT) == b'-'
+            resp.append((await asyncio.wait_for(self.reader.readline(), TIMEOUT)).strip().decode())
 
         return int(code), resp
 
@@ -43,11 +43,11 @@ class SMTP:
             if e.errno != 115:
                 raise
 
-        self.reader = uasyncio.StreamReader(self.sock)
-        self.writer = uasyncio.StreamWriter(self.sock, {})
+        self.reader = asyncio.StreamReader(self.sock)
+        self.writer = asyncio.StreamWriter(self.sock, {})
 
-        code = int(await uasyncio.wait_for(self.reader.readexactly(3), TIMEOUT))
-        await uasyncio.wait_for(self.reader.readline(), TIMEOUT)
+        code = int(await asyncio.wait_for(self.reader.readexactly(3), TIMEOUT))
+        await asyncio.wait_for(self.reader.readline(), TIMEOUT)
 
         assert code == 220, 'cant connect to server'
 
@@ -75,10 +75,9 @@ class SMTP:
         return code, resp
 
     async def to(self, addrs):
-        mail_from = "minutePing@example.org"
         code, resp = await self.cmd(CMD_EHLO + ' ' + LOCAL_DOMAIN)
         assert code==250, '%d' % code
-        code, resp = await self.cmd('MAIL FROM: <%s>' % mail_from)
+        code, resp = await self.cmd('MAIL FROM: <%s>' % self.username)
         assert code==250, 'sender refused %d, %s' % (code, resp)
 
         if isinstance(addrs, str):
@@ -98,10 +97,10 @@ class SMTP:
     async def send(self, content=''):
         if content:
             self.writer.write(content)
-            await uasyncio.wait_for(self.writer.drain(), TIMEOUT)
+            await asyncio.wait_for(self.writer.drain(), TIMEOUT)
         self.writer.write('\r\n.\r\n') # the five letter sequence marked for ending
-        await uasyncio.wait_for(self.writer.drain(), TIMEOUT)
-        line = await uasyncio.wait_for(self.reader.readline(), TIMEOUT)
+        await asyncio.wait_for(self.writer.drain(), TIMEOUT)
+        line = await asyncio.wait_for(self.reader.readline(), TIMEOUT)
         return (int(line[:3]), line[4:].strip().decode())
 
     def quit(self):

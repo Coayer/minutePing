@@ -6,7 +6,7 @@
 # Author: Olav Morken
 # https://github.com/olavmrk/python-ping/blob/master/ping.py
 
-import uasyncio
+import uasyncio as asyncio
 import utime
 import uctypes
 import usocket
@@ -63,8 +63,8 @@ async def ping(host, timeout=5, size=64):
         if e.errno != 115:
             raise
 
-    reader = uasyncio.StreamReader(sock)
-    writer = uasyncio.StreamWriter(sock, {})
+    reader = asyncio.StreamReader(sock)
+    writer = asyncio.StreamWriter(sock, {})
 
     h.seq = 0
     h.timestamp = utime.ticks_us()
@@ -72,14 +72,14 @@ async def ping(host, timeout=5, size=64):
 
     try:
         writer.write(pkt)
-        await uasyncio.wait_for(writer.drain(), timeout)
-        resp = await uasyncio.wait_for(reader.readexactly(size), timeout)
+        await asyncio.wait_for(writer.drain(), timeout)
+        resp = await asyncio.wait_for(reader.readexactly(size), timeout)
     except OSError as e:
         if e.errno == 110:
             return False
         else:
             raise
-    except uasyncio.TimeoutError:
+    except asyncio.TimeoutError:
         return False
     finally:
         sock.close()
