@@ -1,6 +1,6 @@
 # minutePing
 
-A status notifier written for the ESP8266 in MicroPython. Supports email notifications.
+Server status monitoring for the ESP8266 in MicroPython. Supports email notifications.
 
 ## Installation
 
@@ -36,14 +36,11 @@ repl
 
 Then visit http://micropython.org/webrepl/ and enter your board's IP address and WebREPL password.
 
-While minutePing is starting and while services are being checked, the LED on the ESP8266 will turn on. If the LED is stuck on or doesn't blink, power cycle or reset the board using RST.
-
 #### Updating `config.json` via WebREPL
 
 Visit http://micropython.org/webrepl/. 
 Enter your board's IP address and WebREPL password and upload the new `config.json` file with the "Send a file" option. To fetch the existing `config.json` file from the board, use the "Get a file" option.
-Click the terminal widget and press `CTRL+D` to reboot.
-
+Click the terminal widget and press `CTRL+C` to stop minutePing. The board will then reboot automatically.
 
 ## Configuration
 
@@ -51,23 +48,22 @@ minutePing uses a JSON configuration file called `config.json`. For information 
 
 See `sample_config.json` for a starter configuration file. Either copy-paste into a new file called `config.json` or rename to `config.json` and fill in the blanks. 
 
+While minutePing is starting and while services are being checked, the LED on the ESP8266 will turn on. If the LED is stuck on, power cycle or reset the board using RST. This is likely due to an issue with your `config.json` file.
+
 minutePing does not support SMTP over SSL/TLS. Use a free SMTP server with a dedicated account to avoid exposing your personal email account.
 
 To test the email configuration, set the `send_test_email` option to `true` in the `email` section. This will send a test email using the settings from `configuration.json` when minutePing starts. minutePing's emails may be marked as spam, so refer to your email provider's documentation on whitelisting email addresses. 
 
-The WebREPL gives remote access to your minutePing installation. It can be used to check logs and modify the `config.json` file. The WebREPL will only be enabled if a JSON object exists in the configuration with the name `webrepl`.
+The WebREPL gives remote access to your minutePing installation. It can be used to check logs in realtime and modify the `config.json` file. The WebREPL will only be enabled if a JSON object exists in the configuration with the name `webrepl`.
 
 ### Example configuration file format
 
 ```json
 {
-  "services": [{...}, {...}],
-
-  "network": {...},
-
-  "email": {...},
-   
-   "webrepl" : {...}
+   "services": [{}, {}],
+   "network": {},
+   "email": {}, 
+   "webrepl" : {}
 }
 ```
 
@@ -154,3 +150,8 @@ Example:
    "password": "minute"
 }
 ```
+
+### Miscellaneous optional boolean flags
+
+ - `watchdog`: Sets watchdog timer
+ - `web_server`: Sets web server for status page

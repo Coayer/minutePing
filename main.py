@@ -10,7 +10,7 @@ import uasyncio as asyncio
 
 #TODO add exception catches for getaddr timeout incase dns fails
 #TODO replace upython ntptime with ntp
-#TODO remove AP activate in boot.py
+#TODO remove AP activate in boot.py?
 #TODO custom firmware builds
 
 class Service:
@@ -23,16 +23,17 @@ class Service:
                                       else 3)
         self.failures = 0
         self.notified = False
+        self.online = False
 
         print("Initialized service {} {}".format(service_config["name"], service_config["host"]))
 
     async def monitor(self):
         while True:
             led(0)
-            online = await self.test_service()
+            self.online = await self.test_service()
             led(1)
 
-            if online:
+            if self.online:
                 print(self.name + " online")
                 self.failures = 0
 
@@ -61,6 +62,9 @@ class Service:
 
     def get_check_interval(self):
         return self.check_interval
+
+    def get_status(self):
+        return self.online
 
 
 class HTTPService(Service):
@@ -196,6 +200,32 @@ async def notify(service_object, status):
         return False
 
 
+async def web_server_handler(reader, writer):
+    print("Handling web request...")
+
+    try:
+        while True:
+            line = await reader.readline()
+            if not line or line == b'\r\n':
+                break
+
+        rows = ["<tr><td>{}</td><td>{}</td></tr>".format(service.get_name(), "Online" if service.get_status() else "Offline")
+                for service in monitored_services]
+        response = html.format('\n'.join(rows))
+
+        writer.write('HTTP/1.0 200 OK\r\nContent-type: text/html\r\n\r\n')
+        await writer.drain()
+        writer.write(response)
+        await writer.drain()
+    except OSError as e:
+        print("Web server encountered OSError " + str(e))
+    finally:
+        reader.close()
+        await reader.wait_closed()
+        writer.close()
+        await writer.wait_closed()
+
+
 # for debugging https://github.com/peterhinch/micropython-async/blob/master/v3/docs/TUTORIAL.md#22-coroutines-and-tasks
 def set_global_exception():
     def handle_exception(loop, context):
@@ -206,15 +236,14 @@ def set_global_exception():
 
 
 async def main():
-    global monitored_services
-
     set_global_exception()
 
     for service in monitored_services:
         asyncio.create_task(service.monitor())
 
     while True:
-        wdt.feed()
+        if watchdog_enabled:
+            wdt.feed()
         await asyncio.sleep(1)
 
 led = Pin(2, Pin.OUT, value=1)
@@ -257,6 +286,10 @@ try:
         if len(webrepl_password) < 4 or len(webrepl_password) > 9:
             raise ValueError("WebREPL password must be between 4 and 9 characters")
 
+    web_server_enabled = config["web_server"] if "web_server" in config else True
+
+    watchdog_enabled = config["watchdog"] if "watchdog" in config else True
+
     monitored_services = []
 
     for service_config in config["services"]:
@@ -292,12 +325,24 @@ sta_if.connect(ssid, wifi_password)
 while not sta_if.isconnected():
     pass
 
-print("Connected with config " + str(sta_if.ifconfig()))
+print("Connected with network configuration " + str(sta_if.ifconfig()))
 
 if webrepl_enabled:
     print("Starting WebREPL...")
     import webrepl
     webrepl.start(password=webrepl_password)
+
+if web_server_enabled:
+    asyncio.create_task(asyncio.start_server(web_server_handler, "0.0.0.0", 80, 20))
+
+    html = """<!DOCTYPE html>
+    <html>
+        <head> <title>minutePing</title> </head>
+        <body> <h1>Monitored services</h1>
+            <table border="1"> <tr><th>Service name</th><th>Status</th></tr> {} </table>
+        </body>
+    </html>
+    """
 
 print("Starting real-time clock...")
 rtc = RTC()
@@ -307,8 +352,9 @@ if send_test_email:
 
 led(1)
 
-print("Starting watchdog timer...")
-wdt = WDT()
+if watchdog_enabled:
+    print("Starting watchdog timer...")
+    wdt = WDT()
 
 try:
     asyncio.run(main())
