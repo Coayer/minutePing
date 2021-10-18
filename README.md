@@ -1,6 +1,6 @@
 # minutePing
 
-Server status monitoring for the ESP8266 in MicroPython. Supports email notifications.
+Server status monitoring firmware for the ESP8266 in MicroPython. Supports email notifications.
 
 ## Installation
 
@@ -41,6 +41,10 @@ Then visit http://micropython.org/webrepl/ and enter your board's IP address and
 Visit http://micropython.org/webrepl/. 
 Enter your board's IP address and WebREPL password and upload the new `config.json` file with the "Send a file" option. To fetch the existing `config.json` file from the board, use the "Get a file" option.
 Click the terminal widget and press `CTRL+C` to stop minutePing. The board will then reboot automatically.
+
+#### Service status webpage
+
+Enter your board's IP address into a browser to see the current status of the monitored services.
 
 ## Configuration
 

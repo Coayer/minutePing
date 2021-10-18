@@ -8,10 +8,11 @@ import network
 import socket
 import uasyncio as asyncio
 
-#TODO add exception catches for getaddr timeout incase dns fails
-#TODO replace upython ntptime with ntp
-#TODO remove AP activate in boot.py?
-#TODO custom firmware builds
+# TODO add exception catches for getaddr timeout incase dns fails
+# TODO replace upython ntptime with ntp
+# TODO remove AP activate in boot.py?
+# TODO custom firmware builds
+
 
 class Service:
     def __init__(self, service_config):
@@ -23,19 +24,20 @@ class Service:
                                       else 3)
         self.failures = 0
         self.notified = False
-        self.online = False
+        self.status = False
 
         print("Initialized service {} {}".format(service_config["name"], service_config["host"]))
 
     async def monitor(self):
         while True:
             led(0)
-            self.online = await self.test_service()
+            online = await self.test_service()
             led(1)
 
-            if self.online:
+            if online:
                 print(self.name + " online")
                 self.failures = 0
+                self.status = True
 
                 if self.notified:
                     await notify(self, "online")
@@ -47,6 +49,7 @@ class Service:
 
                 if self.failures >= self.notify_after_failures and not self.notified:
                     print(self.name + " reached failure threshold!")
+                    self.status = False
                     self.notified = await notify(self, "offline")
 
             await asyncio.sleep(self.check_interval)
@@ -64,7 +67,7 @@ class Service:
         return self.check_interval
 
     def get_status(self):
-        return self.online
+        return self.status
 
 
 class HTTPService(Service):
