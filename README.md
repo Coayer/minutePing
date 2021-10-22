@@ -4,43 +4,34 @@ Server status monitoring firmware for the ESP8266 in MicroPython. Supports email
 
 ## Installation
 
-Download the latest stable firmware for your ESP8266 from https://micropython.org/download/esp8266/
-
 Linux:
 ```bash
-git clone https://gitlab.com/coayer/minutePing.git
-
 # creates Python venv in current directory and installs tools
-python -m venv minutePing
-source minutePing/bin/activate
-pip install esptool rshell
-
-sudo usermod -aG dialout $USER  # user needs dialout permissions or root
+python -m venv minutePing && source minutePing/bin/activate && pip install esptool
 
 # might need to adjust path from /dev/ttyUSB0
-esptool.py --port /dev/ttyUSB0 erase_flash
-esptool.py --port /dev/ttyUSB0 --baud 460800 write\_flash --flash\_size=detect 0 esp8266-*.bin # might need to change firmware file path and baud rate
-
-rshell
-connect serial /dev/ttyUSB0
-cp main.py umail.py uping.py ntp.py config.json /pyboard
+# root needed due to dialout permissions (can run without sudo if your user is in the dialout group)
+sudo esptool.py --port /dev/ttyUSB0 erase_flash # wipes storage
+sudo esptool.py --port /dev/ttyUSB0 --baud 460800 write\_flash --flash\_size=detect 0 minutePing_*.bin # installs firmware
 ```
 
-To enable remote access, set up the MicroPython WebREPL while inside an rshell REPL prompt:
-```bash
-rshell
-connect serial /dev/ttyUSB0
-repl
-```
-`>>> import webrepl_setup`
+You should now see a Wi-Fi network called `minutePing`.
+Visit http://micropython.org/webrepl/. Browsers may redirect to HTTPS. If this happens, clear site data for micropython.org and navigate directly to the HTTP URL.
+Connect to the Wi-Fi network `minutePing` with password `pingpong`. 
+At the top left of your WebREPL browser tab, click connect. Enter the password `pingpong` when prompted.
+Upload your `config.json` file with the "Send a file" option at the top right of the screen, making sure to click "Send to device".
+Reset your board by disconnecting it from power or using its RST button.
 
-Then visit http://micropython.org/webrepl/ and enter your board's IP address and WebREPL password.
+If there is a problem with the uploaded `config.json` file, you can modify it using the same process.
 
 #### Updating `config.json` via WebREPL
 
-Visit http://micropython.org/webrepl/. 
-Enter your board's IP address and WebREPL password and upload the new `config.json` file with the "Send a file" option. To fetch the existing `config.json` file from the board, use the "Get a file" option.
+Follow the WebREPL steps of the installation guide, but changing the address inside the WebREPL to the board's IP on your Wi-Fi network. To fetch the existing `config.json` file from the board, use the "Get a file" option.
 Click the terminal widget and press `CTRL+C` to stop minutePing. The board will then reboot automatically.
+
+#### Updating minutePing firmware
+
+Use the last line of the installation commands. Check release on GitLab for breaking changes with config.json.
 
 #### Service status webpage
 

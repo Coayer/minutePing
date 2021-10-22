@@ -1,7 +1,7 @@
 from json import load
 from machine import RTC, Pin, WDT
 import sys
-import ntp
+import ntptime
 import umail
 import uping
 import network
@@ -9,9 +9,6 @@ import socket
 import uasyncio as asyncio
 
 # TODO add exception catches for getaddr timeout incase dns fails
-# TODO replace upython ntptime with ntp
-# TODO remove AP activate in boot.py?
-# TODO custom firmware builds
 
 
 class Service:
@@ -172,7 +169,7 @@ class DNSService(Service):
 
 
 async def notify(service_object, status):
-    await ntp.set_time()
+    await ntptime.set_time()
 
     minutes_since_failure = service_object.get_check_interval() * service_object.get_number_of_failures() / 60
     minutes_since_failure = int(minutes_since_failure) if int(minutes_since_failure) == minutes_since_failure \
@@ -229,6 +226,18 @@ async def web_server_handler(reader, writer):
         await writer.wait_closed()
 
 
+def wifi_ap_fallback(message):
+    import webrepl, time
+
+    ap_if = network.WLAN(network.AP_IF)
+    ap_if.config(essid=b"minutePing", authmode=network.AUTH_WPA_WPA2_PSK, password=b"pingpong")
+    webrepl.start(password="pingpong")
+
+    while True:
+        print(message)
+        time.sleep(5)
+
+
 # for debugging https://github.com/peterhinch/micropython-async/blob/master/v3/docs/TUTORIAL.md#22-coroutines-and-tasks
 def set_global_exception():
     def handle_exception(loop, context):
@@ -252,12 +261,13 @@ async def main():
 led = Pin(2, Pin.OUT, value=1)
 led(0)
 
-with open("config.json", "r") as config_file:
-    try:
+try:
+    with open("config.json", "r") as config_file:
         config = load(config_file)
-    except ValueError:
-        print("Invalid config file!")
-        sys.exit(1)
+except ValueError:
+    wifi_ap_fallback("Invalid JSON in config file!")
+except OSError:
+    wifi_ap_fallback("minutePing successfully installed. See documentation for creating a config.json file.")
 
 try:
     print("Loading configuration...")
@@ -307,14 +317,11 @@ try:
             monitored_services.append(DNSService(service_config))
 
 except KeyError as e:
-    print("Missing required configuration value " + e.args[0])
-    sys.exit(1)
+    wifi_ap_fallback("Missing required configuration value " + e.args[0])
 
 del config  # only needed for config loading
 
 print("Activating Wi-Fi...")
-ap_if = network.WLAN(network.AP_IF)
-ap_if.active(False)
 
 sta_if = network.WLAN(network.STA_IF)
 sta_if.active(True)
@@ -344,8 +351,7 @@ if web_server_enabled:
         <body> <h1>Monitored services</h1>
             <table border="1"> <tr><th>Service name</th><th>Status</th></tr> {} </table>
         </body>
-    </html>
-    """
+    </html>"""
 
 print("Starting real-time clock...")
 rtc = RTC()
