@@ -4,7 +4,8 @@ Server status monitoring firmware for the ESP8266 in MicroPython. Supports email
 
 ## Installation
 
-Linux:
+Connect your board to your PC.
+
 ```bash
 # creates Python venv in current directory and installs tools
 python -m venv minutePing && source minutePing/bin/activate && pip install esptool
@@ -13,25 +14,41 @@ python -m venv minutePing && source minutePing/bin/activate && pip install espto
 # root needed due to dialout permissions (can run without sudo if your user is in the dialout group)
 sudo esptool.py --port /dev/ttyUSB0 erase_flash # wipes storage
 sudo esptool.py --port /dev/ttyUSB0 --baud 460800 write\_flash --flash\_size=detect 0 minutePing_*.bin # installs firmware
+
+rm -rf minutePing # (optional) deletes tools
 ```
 
-You should now see a Wi-Fi network called `minutePing`.
+Before continuing with the next steps, read the [configuration documentation](#configuration) below.
+
 Visit http://micropython.org/webrepl/. Browsers may redirect to HTTPS. If this happens, clear site data for micropython.org and navigate directly to the HTTP URL.
-Connect to the Wi-Fi network `minutePing` with password `pingpong`. 
+
+Connect to the Wi-Fi network `minutePing` with password `pingpong`.
+
 At the top left of your WebREPL browser tab, click connect. Enter the password `pingpong` when prompted.
+
 Upload your `config.json` file with the "Send a file" option at the top right of the screen, making sure to click "Send to device".
+
 Reset your board by disconnecting it from power or using its RST button.
 
-If there is a problem with the uploaded `config.json` file, you can modify it using the same process.
+If there is a problem with the uploaded `config.json` file, you can modify it using the same process (after the bash commands).
 
 #### Updating `config.json` via WebREPL
+
+The WebREPL gives remote access to your minutePing installation. It can be used to check logs in realtime and modify the `config.json` file.
 
 Follow the WebREPL steps of the installation guide, but changing the address inside the WebREPL to the board's IP on your Wi-Fi network. To fetch the existing `config.json` file from the board, use the "Get a file" option.
 Click the terminal widget and press `CTRL+C` to stop minutePing. The board will then reboot automatically.
 
 #### Updating minutePing firmware
 
-Use the last line of the installation commands. Check release on GitLab for breaking changes with config.json.
+Before flashing, check release on GitLab for breaking changes with `config.json`.
+
+```bash
+source minutePing/bin/activate # if this fails, instead enter:
+# python -m venv minutePing && source minutePing/bin/activate && pip install esptool
+
+sudo esptool.py --port /dev/ttyUSB0 --baud 460800 write\_flash --flash\_size=detect 0 minutePing_*.bin
+```
 
 #### Service status webpage
 
@@ -41,7 +58,7 @@ Enter your board's IP address into a browser to see the current status of the mo
 
 minutePing uses a JSON configuration file called `config.json`. For information on each option, refer to the sections below.
 
-See `sample_config.json` for a starter configuration file. Either copy-paste into a new file called `config.json` or rename to `config.json` and fill in the blanks. 
+See [Sample configuration file](#sample-configuration-file) for a starter configuration file. Copy-paste into a new file called `config.json` and fill in the blanks. 
 
 While minutePing is starting and while services are being checked, the LED on the ESP8266 will turn on. If the LED is stuck on, power cycle or reset the board using RST. This is likely due to an issue with your `config.json` file.
 
@@ -49,16 +66,35 @@ minutePing does not support SMTP over SSL/TLS. Use a free SMTP server with a ded
 
 To test the email configuration, set the `send_test_email` option to `true` in the `email` section. This will send a test email using the settings from `configuration.json` when minutePing starts. minutePing's emails may be marked as spam, so refer to your email provider's documentation on whitelisting email addresses. 
 
-The WebREPL gives remote access to your minutePing installation. It can be used to check logs in realtime and modify the `config.json` file. The WebREPL will only be enabled if a JSON object exists in the configuration with the name `webrepl`.
-
-### Example configuration file format
+### Sample configuration file
 
 ```json
 {
-   "services": [{}, {}],
-   "network": {},
-   "email": {}, 
-   "webrepl" : {}
+  "services": [
+    {
+      "name": "",
+      "type": "",
+      "host": ""
+    }
+  ],
+
+  "network": {
+    "ssid": "",
+    "password": ""
+  },
+
+  "email": {
+    "recipient_addresses": "",
+    "smtp_server": "",
+    "port": 587,
+    "username": "",
+    "password": "",
+    "send_test_email": true
+  },
+
+  "webrepl" : {
+    "password": "pingpong"
+  }
 }
 ```
 
@@ -135,6 +171,8 @@ Example:
 ```
 
 ### WebREPL
+
+To disable, remove the `webrepl` section from `config.json`.
 
  - `password`: (Required) WebREPL access password. Must have length between 4 and 9 characters
 
