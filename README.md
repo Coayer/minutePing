@@ -20,7 +20,7 @@ rm -rf minutePing # (optional) deletes tools
 
 Before continuing with the next steps, read the [configuration documentation](#configuration) below.
 
-Visit http://micropython.org/webrepl/. Browsers may redirect to HTTPS. If this happens, clear site data for micropython.org and navigate directly to the HTTP URL.
+Visit http://micropython.org/webrepl/ and keep the tab open. Browsers may redirect to HTTPS. If this happens, clear site data for micropython.org and navigate directly to the HTTP URL.
 
 Connect to the Wi-Fi network `minutePing` with password `pingpong`.
 
@@ -36,7 +36,7 @@ If there is a problem with the uploaded `config.json` file, you can modify it us
 
 The WebREPL gives remote access to your minutePing installation. It can be used to check logs in realtime and modify the `config.json` file.
 
-Follow the WebREPL steps of the installation guide, but changing the address inside the WebREPL to the board's IP on your Wi-Fi network. To fetch the existing `config.json` file from the board, use the "Get a file" option.
+Enter the IP address of your board in a web browser. You should see the status page. Click the "Administrator interface" link. To fetch the existing `config.json` file from the board, use the "Get a file" option.
 Click the terminal widget and press `CTRL+C` to stop minutePing. The board will then reboot automatically.
 
 #### Updating minutePing firmware

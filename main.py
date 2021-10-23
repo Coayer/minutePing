@@ -169,7 +169,7 @@ class DNSService(Service):
 
 
 async def notify(service_object, status):
-    await ntptime.set_time()
+    await ntptime.settime()
 
     minutes_since_failure = service_object.get_check_interval() * service_object.get_number_of_failures() / 60
     minutes_since_failure = int(minutes_since_failure) if int(minutes_since_failure) == minutes_since_failure \
@@ -209,9 +209,10 @@ async def web_server_handler(reader, writer):
             if not line or line == b'\r\n':
                 break
 
-        rows = ["<tr><td>{}</td><td>{}</td></tr>".format(service.get_name(), "Online" if service.get_status() else "Offline")
-                for service in monitored_services]
-        response = html.format('\n'.join(rows))
+        table_rows = '\n'.join(["<tr><td>{}</td><td>{}</td></tr>".format(service.get_name(), "Online" if service.get_status() else "Offline")
+                for service in monitored_services])
+
+        response = html.format(table_rows, sta_if.ifconfig()[0])
 
         writer.write('HTTP/1.0 200 OK\r\nContent-type: text/html\r\n\r\n')
         await writer.drain()
@@ -347,9 +348,12 @@ if web_server_enabled:
 
     html = """<!DOCTYPE html>
     <html>
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <style> * {{ font-family: monospace; }} </style>
         <head> <title>minutePing</title> </head>
-        <body> <h1>Monitored services</h1>
+        <body> <h1>Monitored services</h1> 
             <table border="1"> <tr><th>Service name</th><th>Status</th></tr> {} </table>
+            <p><a href="http://micropython.org/webrepl/#{}:8266/">Administrator interface</a><p>
         </body>
     </html>"""
 

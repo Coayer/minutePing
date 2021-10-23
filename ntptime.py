@@ -44,7 +44,7 @@ async def time():
 
 
 # There's currently no timezone support in MicroPython, and the RTC is set in UTC time.
-async def set_time():
+async def settime():
     number_ntp_fetches = 5
 
     for ntp_fetch_attempt in range(number_ntp_fetches):
