@@ -349,7 +349,7 @@ if web_server_enabled:
     html = """<!DOCTYPE html>
     <html>
         <meta name="viewport" content="width=device-width, initial-scale=1">
-        <style> * {{ font-family: monospace; }} </style>
+        <style> * {{ font-family: monospace; }} table {{margin: 0 auto;}} h1 {{text-align: center;}} p {{text-align: center;}}</style>
         <head> <title>minutePing</title> </head>
         <body> <h1>Monitored services</h1> 
             <table border="1"> <tr><th>Service name</th><th>Status</th></tr> {} </table>
