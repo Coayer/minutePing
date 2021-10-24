@@ -4,6 +4,8 @@ Server status monitoring firmware for the ESP8266 in MicroPython. Supports email
 
 ## Installation
 
+Download `minutePing.bin` from the latest release on https://github.com/Coayer/minutePing/releases.
+
 Connect your board to your PC.
 
 ```bash
@@ -13,7 +15,7 @@ python -m venv minutePing && source minutePing/bin/activate && pip install espto
 # might need to adjust path from /dev/ttyUSB0
 # root needed due to dialout permissions (can run without sudo if your user is in the dialout group)
 sudo esptool.py --port /dev/ttyUSB0 erase_flash # wipes storage
-sudo esptool.py --port /dev/ttyUSB0 --baud 460800 write\_flash --flash\_size=detect 0 minutePing_*.bin # installs firmware
+sudo esptool.py --port /dev/ttyUSB0 --baud 460800 write\_flash --flash\_size=detect 0 minutePing.bin # installs firmware
 
 rm -rf minutePing # (optional) deletes tools
 ```
@@ -47,7 +49,7 @@ Before flashing, check release on GitLab for breaking changes with `config.json`
 source minutePing/bin/activate # if this fails, instead enter:
 # python -m venv minutePing && source minutePing/bin/activate && pip install esptool
 
-sudo esptool.py --port /dev/ttyUSB0 --baud 460800 write\_flash --flash\_size=detect 0 minutePing_*.bin
+sudo esptool.py --port /dev/ttyUSB0 --baud 460800 write\_flash --flash\_size=detect 0 minutePing.bin
 ```
 
 #### Service status webpage
