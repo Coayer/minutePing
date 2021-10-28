@@ -1,39 +1,50 @@
-from utils import *
+from utils import led
+from math import nan
 import uping
 import uasyncio as asyncio
 import socket
+import time
 
 
 class Service:
-    def __init__(self, service_config, notifiers=None):
+    def __init__(self, config, notifiers=None):
         if notifiers is None:
             notifiers = []
-        self.name = service_config["name"]
-        self.host = service_config["host"]
-        self.check_interval = (service_config["check_interval"] if "check_interval" in service_config else 60)
-        self.timeout = (service_config["timeout"] if "timeout" in service_config else 5)
+        self.name = config["name"]
+        self.host = config["host"]
+        self.check_interval = (config["check_interval"] if "check_interval" in config else 60)
+        self.timeout = (config["timeout"] if "timeout" in config else 5)
 
         self.notifiers = notifiers
         self.notified = [False] * len(self.notifiers)
-        self.notify_after_failures = (service_config["notify_after_failures"] if "notify_after_failures" in service_config
+        self.notify_after_failures = (config["notify_after_failures"] if "notify_after_failures" in config
                                       else 3)
         self.failures = 0
+        self.online = False
 
-        self.status = False
+        self.history = []
+        self.max_history_length = 100   # could be user programmable
 
         print("Initialized service {} {}".format(self.name, self.host))
-        del service_config
+        del config
 
     async def monitor(self):
         while True:
             led(0)
+            start_check_time = time.ticks_ms()
             online = await self.test_service()
             led(1)
 
             if online:
-                print(self.name + " online")
+                latency = time.ticks_ms() - start_check_time
+                print("{} online {}ms".format(self.name, latency))
+
+                self.history.append(latency)
+                if len(self.history > self.max_history_length):
+                    self.history.pop(0)
+
                 self.failures = 0
-                self.status = True
+                self.online = True
 
                 for notifier in range(len(self.notifiers)):
                     if self.notified[notifier]:
@@ -41,11 +52,16 @@ class Service:
 
             else:
                 print(self.name + " offline")
+
+                self.history.append(nan)
+                if len(self.history > self.max_history_length):
+                    self.history.pop(0)
+
                 self.failures += 1
 
                 if self.failures >= self.notify_after_failures:
                     print(self.name + " reached failure threshold!")
-                    self.status = False
+                    self.online = False
 
                     for notifier in range(len(self.notifiers)):  # possible to not be notified at all if notifiers fail
                         if not self.notified[notifier]:
@@ -66,14 +82,17 @@ class Service:
         return self.check_interval
 
     def get_status(self):
-        return self.status
+        return self.online
+
+    def get_history(self):
+        return self.history
 
 
 class HTTPService(Service):
-    def __init__(self, service_config, notifiers=None):
-        Service.__init__(self, service_config, notifiers)
-        self.port = (service_config["port"] if "port" in service_config else 80)
-        self.response_code = (str(service_config["response_code"]) if "response_code" in service_config else "200")
+    def __init__(self, config, notifiers=None):
+        Service.__init__(self, config, notifiers)
+        self.port = (config["port"] if "port" in config else 80)
+        self.response_code = (str(config["response_code"]) if "response_code" in config else "200")
 
         split = self.host.split('/', 1)
         if len(split) == 2:
@@ -120,16 +139,16 @@ class HTTPService(Service):
 
 
 class ICMPService(Service):
-    def __init__(self, service_config, notifiers=None):
-        Service.__init__(self, service_config, notifiers)
+    def __init__(self, config, notifiers=None):
+        Service.__init__(self, config, notifiers)
 
     async def test_service(self):
         return await uping.ping(self.host, timeout=self.timeout)
 
 
 class DNSService(Service):
-    def __init__(self, service_config, notifiers=None):
-        Service.__init__(self, service_config, notifiers)
+    def __init__(self, config, notifiers=None):
+        Service.__init__(self, config, notifiers)
 
     async def test_service(self):
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)

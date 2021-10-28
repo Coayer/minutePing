@@ -10,12 +10,15 @@ Connect your board to your PC.
 
 ```bash
 # creates Python venv in current directory and installs tools
-python -m venv minutePing && source minutePing/bin/activate && pip install esptool
+python3 -m venv minutePing && source minutePing/bin/activate && pip install --upgrade pip
+&& pip install esptool
+
+#adds user to dialout group
+sudo usermod -aG dialout $USER
 
 # might need to adjust path from /dev/ttyUSB0
-# root needed due to dialout permissions (can run without sudo if your user is in the dialout group)
-sudo esptool.py --port /dev/ttyUSB0 erase_flash # wipes storage
-sudo esptool.py --port /dev/ttyUSB0 --baud 460800 write\_flash --flash\_size=detect 0 minutePing.bin # installs firmware
+esptool.py --port /dev/ttyUSB0 erase_flash # wipes storage
+esptool.py --port /dev/ttyUSB0 --baud 460800 write\_flash --flash\_size=detect 0 minutePing.bin # installs firmware
 
 rm -rf minutePing # (optional) deletes tools
 ```

@@ -1,10 +1,12 @@
 from services import Service
+from utils import rtc
 import ntptime
 import umail
 import uasyncio as asyncio
 
 
-# TODO change to superclass of notifiers, move to separate file like services
+# TODO change to superclass of notifiers
+
 class EmailNotifier:
     def __init__(self, config):
         self.recipient_email_addresses = config["recipient_addresses"]
@@ -13,9 +15,10 @@ class EmailNotifier:
         self.smtp_username = config["username"]
         self.smtp_password = config["password"]
 
-        send_test = config["send_test_email"] if "send_test_email" in config else False
+        send_test = config["test"] if "test" in config else False
         if send_test:
             asyncio.create_task(self.notify(Service({"name": "TEST EMAIL SERVICE", "host": "email.test"}), "BEING TESTED"))
+        del config
 
     async def notify(self, service_object, status):
         await ntptime.settime()
@@ -36,7 +39,7 @@ class EmailNotifier:
             await smtp.send("From: minutePing <{}>\n"
                             "Subject: Monitored service {} is {}\n\n"
                             "Current time: {:02d}:{:02d}:{:02d} {:02d}/{:02d}/{} UTC\n\n"
-                            "Monitored service {} was detected as {} {} minutes ago.\n".format(self.smtp_username,
+                            "Monitored service {} was detected as {} {:0.0f} minutes ago.\n".format(self.smtp_username,
                                         service_object.get_name(), status,
                                         current_time[4], current_time[5], current_time[6],
                                         current_time[2], current_time[1], current_time[0],

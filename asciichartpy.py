@@ -2,14 +2,14 @@
 # Author: Igor Kroitor
 # License: MIT
 # https://github.com/kroitor/asciichart
-from math import ceil, floor, isnan, nan
+from math import ceil, floor, isnan
 
 
 def _isnum(n):
     return not isnan(n)
 
 
-def plot(series, offset=3, label_format="{:8.2f}", minimum=None, maximum=None, height=None):
+def plot(series, offset=3, label_format="{:8.0f}", minimum=None, maximum=None, height=None):
     if len(series) == 0:
         return ''
 
