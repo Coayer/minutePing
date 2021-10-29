@@ -3,13 +3,11 @@ from machine import WDT, freq
 from services import *
 from notifiers import *
 from utils import *
+from math import isnan
 import sys
 import network
 import asciichartpy
 import uasyncio as asyncio
-
-
-# TODO add exception catches for getaddr timeout incase dns fails
 
 
 async def web_server_handler(reader, writer):
@@ -35,7 +33,7 @@ async def web_server_handler(reader, writer):
                 table_rows = '\n'.join(["<tr><td><a href=\"{}\">{}</a></td><td>{}</td><td>{}</td></tr>".format(service.get_name(),
                                                                                                     service.get_name(),
                                                                                                     "Online" if service.get_status() else "Offline",
-                                                                                                    service.get_history()[0])
+                                                                                                    service.get_history()[-1] if not isnan(service.get_history()[-1]) else "N/A")
                                         for service in monitored_services])
 
                 response = status_html.format(table_rows, sta_if.ifconfig()[0])
@@ -46,9 +44,11 @@ async def web_server_handler(reader, writer):
             else:
                 for service in monitored_services:
                     if service.get_name().encode("UTF-8") == service_path:
-                        max_latency = max(service.get_history())
+                        max_latency = max(service.get_history()) if len(service.get_history()) != 0 else 1  # no pings
+                        max_latency = max_latency if not isnan(max_latency) else 1  # protects max([nan, 5]) = nan
                         response = service_html.format(service.get_name(),
-                                                       asciichartpy.plot(service.get_history(), height=10, maximum=max_latency if max_latency % 50 == 0 else max_latency + 50 - max_latency % 50),
+                                                       asciichartpy.plot(service.get_history(), height=10,
+                                                       maximum=max_latency if max_latency % 50 == 0 else max_latency + 50 - max_latency % 50),
                                                        "{:0.0f} minutes ago".format(service.get_check_interval() * len(service.get_history()) / 60))
                         writer.write("HTTP/1.0 200 OK\r\nContent-type: text/html\r\n\r\n")
                         await writer.drain()
@@ -93,14 +93,12 @@ def set_global_exception():
 
 
 async def main():
-    import gc
     set_global_exception()
 
     for service in monitored_services:
         asyncio.create_task(service.monitor())
 
     while True:
-        print(gc.mem_free())
         if watchdog_enabled:
             wdt.feed()
         await asyncio.sleep(1)
@@ -198,7 +196,7 @@ if web_server_enabled:
         <style> * {{ font-family: monospace; }} </style>
         <head> <title>minutePing 1.1.0</title> </head>
         <body> <h1>Monitored services</h1> 
-            <table border="1"> <tr><th>Service name</th><th>Status</th><th>Latency (ms)</th></tr> {} </table>
+            <table border="1"> <tr><th>Name</th><th>Status</th><th>Latency (ms)</th></tr> {} </table>
             <p><a href="http://micropython.org/webrepl/#{}:8266/">Administrator interface</a><p>
         </body>
     </html>"""

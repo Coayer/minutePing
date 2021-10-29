@@ -18,7 +18,7 @@ class Service:
         self.notified = [False] * len(self.notifiers)
         self.notify_after_failures = (config["notify_after_failures"] if "notify_after_failures" in config else 3)
         self.failures = 0
-        self.online = False
+        self.status = False
 
         self.history = []
         self.max_history_length = 50   # could be user programmable
@@ -42,7 +42,7 @@ class Service:
                     self.history.pop(0)
 
                 self.failures = 0
-                self.online = True
+                self.status = True
 
                 for notifier in range(len(self.notifiers)):
                     if self.notified[notifier]:
@@ -59,7 +59,7 @@ class Service:
 
                 if self.failures >= self.notify_after_failures:
                     print(self.name + " reached failure threshold!")
-                    self.online = False
+                    self.status = False
 
                     for notifier in range(len(self.notifiers)):  # possible to not be notified at all if notifiers fail
                         if not self.notified[notifier]:
@@ -80,7 +80,7 @@ class Service:
         return self.check_interval
 
     def get_status(self):
-        return self.online
+        return self.status
 
     def get_history(self):
         return self.history
