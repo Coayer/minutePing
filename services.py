@@ -1,5 +1,4 @@
 from utils import led
-from math import nan
 import uping
 import uasyncio as asyncio
 import socket
@@ -17,13 +16,12 @@ class Service:
 
         self.notifiers = notifiers
         self.notified = [False] * len(self.notifiers)
-        self.notify_after_failures = (config["notify_after_failures"] if "notify_after_failures" in config
-                                      else 3)
+        self.notify_after_failures = (config["notify_after_failures"] if "notify_after_failures" in config else 3)
         self.failures = 0
         self.online = False
 
         self.history = []
-        self.max_history_length = 100   # could be user programmable
+        self.max_history_length = 50   # could be user programmable
 
         print("Initialized service {} {}".format(self.name, self.host))
         del config
@@ -40,7 +38,7 @@ class Service:
                 print("{} online {}ms".format(self.name, latency))
 
                 self.history.append(latency)
-                if len(self.history > self.max_history_length):
+                if len(self.history) > self.max_history_length:
                     self.history.pop(0)
 
                 self.failures = 0
@@ -53,8 +51,8 @@ class Service:
             else:
                 print(self.name + " offline")
 
-                self.history.append(nan)
-                if len(self.history > self.max_history_length):
+                self.history.append(float("nan"))
+                if len(self.history) > self.max_history_length:
                     self.history.pop(0)
 
                 self.failures += 1
@@ -65,7 +63,7 @@ class Service:
 
                     for notifier in range(len(self.notifiers)):  # possible to not be notified at all if notifiers fail
                         if not self.notified[notifier]:
-                            self.notified = await self.notifiers[notifier].notify(self, "offline")
+                            self.notified[notifier] = await self.notifiers[notifier].notify(self, "offline")
 
             await asyncio.sleep(self.check_interval)
 

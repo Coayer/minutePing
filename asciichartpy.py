@@ -9,7 +9,7 @@ def _isnum(n):
     return not isnan(n)
 
 
-def plot(series, offset=3, label_format="{:8.0f}", minimum=None, maximum=None, height=None):
+def plot(series, offset=3, label_format="{:5.0f}", minimum=0, maximum=None, height=None):
     if len(series) == 0:
         return ''
 

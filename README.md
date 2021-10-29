@@ -37,6 +37,10 @@ Reset your board by disconnecting it from power or using its RST button.
 
 If there is a problem with the uploaded `config.json` file, you can modify it using the same process (after the bash commands).
 
+#### Updating `config.json` via USB
+
+`ampy -p /dev/ttyUSB0 put config.json`
+
 #### Updating `config.json` via WebREPL
 
 The WebREPL gives remote access to your minutePing installation. It can be used to check logs in realtime and modify the `config.json` file.

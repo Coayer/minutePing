@@ -18,21 +18,24 @@ async def web_server_handler(reader, writer):
 
     try:
         line = await reader.readline()
+        print(line)
+        line = line.split(b' ')
 
-        if line.split(' ')[0] != "GET":
+        if line[0] != b"GET":
             writer.write("HTTP/1.0 400 Bad Request\r\n\r\n")
             await writer.drain()
         else:
-            service_path = line.split('/')[1]
+            service_path = line[1].split(b'/')[1]
             while True:
                 line = await reader.readline()
                 if not line or line == b'\r\n':
                     break
 
-            if service_path == '':
-                table_rows = '\n'.join(["<tr><td><a href=\"{}\">{}</a></td><td>{}</td></tr>".format(service.get_name(),
+            if service_path == b'':
+                table_rows = '\n'.join(["<tr><td><a href=\"{}\">{}</a></td><td>{}</td><td>{}</td></tr>".format(service.get_name(),
                                                                                                     service.get_name(),
-                                                                                                    "Online" if service.get_status() else "Offline")
+                                                                                                    "Online" if service.get_status() else "Offline",
+                                                                                                    service.get_history()[0])
                                         for service in monitored_services])
 
                 response = status_html.format(table_rows, sta_if.ifconfig()[0])
@@ -42,9 +45,10 @@ async def web_server_handler(reader, writer):
                 await writer.drain()
             else:
                 for service in monitored_services:
-                    if service.get_name() == service_path:
+                    if service.get_name().encode("UTF-8") == service_path:
+                        max_latency = max(service.get_history())
                         response = service_html.format(service.get_name(),
-                                                       asciichartpy.plot(service.get_history(), height=15),
+                                                       asciichartpy.plot(service.get_history(), height=10, maximum=max_latency if max_latency % 50 == 0 else max_latency + 50 - max_latency % 50),
                                                        "{:0.0f} minutes ago".format(service.get_check_interval() * len(service.get_history()) / 60))
                         writer.write("HTTP/1.0 200 OK\r\nContent-type: text/html\r\n\r\n")
                         await writer.drain()
@@ -52,6 +56,7 @@ async def web_server_handler(reader, writer):
                         await writer.drain()
                         return
 
+                print("404")
                 writer.write("HTTP/1.0 404 Not Found\r\n\r\n")
                 await writer.drain()
     except OSError as e:
@@ -65,6 +70,7 @@ async def web_server_handler(reader, writer):
 
 
 def wifi_ap_fallback(message):
+    print("AP fallback: {}".format(message))
     import webrepl, time
 
     ap_if = network.WLAN(network.AP_IF)
@@ -87,12 +93,14 @@ def set_global_exception():
 
 
 async def main():
+    import gc
     set_global_exception()
 
     for service in monitored_services:
         asyncio.create_task(service.monitor())
 
     while True:
+        print(gc.mem_free())
         if watchdog_enabled:
             wdt.feed()
         await asyncio.sleep(1)
@@ -186,22 +194,26 @@ if web_server_enabled:
     asyncio.create_task(asyncio.start_server(web_server_handler, "0.0.0.0", 80, 20))
     status_html = """<!DOCTYPE html>
     <html>
-        <meta name="viewport" content="width=device-width, initial-scale=1">
-        <style> * {{ font-family: monospace; }} table {{margin: 0 auto;}} h1 {{text-align: center;}} p {{text-align: center;}}</style>
+        <meta name="viewport" content="width=device-width, initial-scale=1" charset="utf-8">
+        <style> * {{ font-family: monospace; }} </style>
         <head> <title>minutePing 1.1.0</title> </head>
         <body> <h1>Monitored services</h1> 
-            <table border="1"> <tr><th>Service name</th><th>Status</th></tr> {} </table>
+            <table border="1"> <tr><th>Service name</th><th>Status</th><th>Latency (ms)</th></tr> {} </table>
             <p><a href="http://micropython.org/webrepl/#{}:8266/">Administrator interface</a><p>
         </body>
     </html>"""
     service_html = """<!DOCTYPE html>
         <html>
-            <meta name="viewport" content="width=device-width, initial-scale=1">
-            <style> * {{ font-family: monospace; }} table {{margin: 0 auto;}} h1 {{text-align: center;}} pre {{text-align: center;}}</style>
+            <meta name="viewport" content="width=device-width, initial-scale=1" charset="utf-8">
+            <style> * {{ font-family: monospace; }} </style>
             <head> <title>minutePing 1.1.0</title> </head>
             <body> <h1>{}</h1> 
-                <pre>{}
-                         {}</pre>
+                <pre>
+  (ms)
+{}
+      {}
+                </pre>
+                <p><a href="/">Back</a><p>
             </body>
         </html>"""
 
