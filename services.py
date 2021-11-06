@@ -1,8 +1,12 @@
 from utils import led
-import uping
+from math import isnan
 import uasyncio as asyncio
 import socket
 import time
+import uctypes
+import ustruct
+import uos
+import uselect
 
 
 class Service:
@@ -11,8 +15,8 @@ class Service:
             notifiers = []
         self.name = config["name"]
         self.host = config["host"]
-        self.check_interval = (config["check_interval"] if "check_interval" in config else 60)
-        self.timeout = (config["timeout"] if "timeout" in config else 5)
+        self.check_interval = (config["check_interval"] if "check_interval" in config else 180)
+        self.timeout = (config["timeout"] if "timeout" in config else 1)
 
         self.notifiers = notifiers
         self.notified = [False] * len(self.notifiers)
@@ -29,18 +33,15 @@ class Service:
     async def monitor(self):
         while True:
             led(0)
-            start_check_time = time.ticks_ms()
-            online = await self.test_service()
+            latency = await self.test_service()
             led(1)
 
-            if online:
-                latency = time.ticks_ms() - start_check_time
+            self.history.append(latency)
+            if len(self.history) > self.max_history_length:
+                self.history.pop(0)
+
+            if not isnan(latency):
                 print("{} online {}ms".format(self.name, latency))
-
-                self.history.append(latency)
-                if len(self.history) > self.max_history_length:
-                    self.history.pop(0)
-
                 self.failures = 0
                 self.status = True
 
@@ -50,11 +51,6 @@ class Service:
 
             else:
                 print(self.name + " offline")
-
-                self.history.append(float("nan"))
-                if len(self.history) > self.max_history_length:
-                    self.history.pop(0)
-
                 self.failures += 1
 
                 if self.failures >= self.notify_after_failures:
@@ -68,7 +64,7 @@ class Service:
             await asyncio.sleep(self.check_interval)
 
     async def test_service(self):
-        return True
+        return float("nan")
 
     def get_name(self):
         return self.name
@@ -117,14 +113,16 @@ class HTTPService(Service):
             writer.write(bytes("GET /{} HTTP/1.0\r\nHost: {}\r\n\r\n".format(self.path, self.host), "utf-8"))
             await asyncio.wait_for(writer.drain(), self.timeout)
 
+            start_check_time = time.ticks_ms()
             data = await asyncio.wait_for(reader.read(15), self.timeout)   # 15B will not work with HTTP versions >= 10
+            latency = time.ticks_ms() - start_check_time
         except OSError as e:
             if e.errno == 110:
-                return False
+                return float("nan")
             else:
                 raise
         except asyncio.TimeoutError:
-            return False
+            return float("nan")
         finally:
             sock.close()
             reader.close()
@@ -133,15 +131,105 @@ class HTTPService(Service):
             await writer.wait_closed()
 
         response_code = str(data, "utf-8").split()[1]
-        return self.response_code == response_code
+        if self.response_code == response_code:
+            return latency
+        else:
+            return float("nan")
 
 
 class ICMPService(Service):
     def __init__(self, config, notifiers=None):
         Service.__init__(self, config, notifiers)
 
+    def checksum(self, data):
+        if len(data) & 0x1:  # Odd number of bytes
+            data += b'\0'
+        cs = 0
+        for pos in range(0, len(data), 2):
+            b1 = data[pos]
+            b2 = data[pos + 1]
+            cs += (b1 << 8) + b2
+        while cs >= 0x10000:
+            cs = (cs & 0xffff) + (cs >> 16)
+        cs = ~cs & 0xffff
+        return cs
+
     async def test_service(self):
-        return await uping.ping(self.host, timeout=self.timeout)
+        size = 64
+        # prepare packet
+        pkt = b'Q' * size
+        pkt_desc = {
+            "type": uctypes.UINT8 | 0,
+            "code": uctypes.UINT8 | 1,
+            "checksum": uctypes.UINT16 | 2,
+            "id": (uctypes.ARRAY | 4, 2 | uctypes.UINT8),
+            "seq": uctypes.INT16 | 6,
+            "timestamp": uctypes.UINT64 | 8,
+        }  # packet header descriptor
+        h = uctypes.struct(uctypes.addressof(pkt), pkt_desc, uctypes.BIG_ENDIAN)
+        h.type = 8  # ICMP_ECHO_REQUEST
+        h.code = 0
+        h.checksum = 0
+        h.id[0:2] = uos.urandom(2)
+        h.seq = 1
+
+        try:
+            addr = socket.getaddrinfo(self.host, 1)[0][-1][0]  # ip address
+        except IndexError:
+            print("Could not determine the address of", self.host)
+            return float("nan")
+
+        # init socket
+        sock = socket.socket(socket.AF_INET, socket.SOCK_RAW, 1)
+        sock.setblocking(False)
+
+        try:
+            sock.connect((addr, 1))
+        except OSError as e:
+            if e.errno != 115:
+                raise
+
+        reader = asyncio.StreamReader(sock)
+        writer = asyncio.StreamWriter(sock, {})
+
+        # needed because wifi pings are temperamental
+        for seq in range(5):
+            h.seq = seq
+            h.timestamp = time.ticks_us()
+            h.checksum = self.checksum(pkt)
+
+            try:
+                writer.write(pkt)
+                await asyncio.wait_for(writer.drain(), self.timeout)
+
+                start_check_time = time.ticks_ms()
+                resp = await asyncio.wait_for(reader.readexactly(64), self.timeout)
+                latency = time.ticks_ms() - start_check_time
+            except OSError as e:
+                if e.errno == 110:
+                    continue
+                else:
+                    raise
+            except asyncio.TimeoutError:
+                continue
+
+            resp_mv = memoryview(resp)
+            h2 = uctypes.struct(uctypes.addressof(resp_mv[20:]), pkt_desc, uctypes.BIG_ENDIAN)
+
+            if h2.type == 0 and h2.id == h.id and h2.seq==seq:
+                sock.close()
+                reader.close()
+                await reader.wait_closed()
+                writer.close()
+                await writer.wait_closed()
+                return latency
+
+        sock.close()
+        reader.close()
+        await reader.wait_closed()
+        writer.close()
+        await writer.wait_closed()
+        return float("nan")
 
 
 class DNSService(Service):
@@ -168,14 +256,16 @@ class DNSService(Service):
                          b"\x00\x00\x01\x00\x01")
             await asyncio.wait_for(writer.drain(), self.timeout)
 
+            start_check_time = time.ticks_ms()
             result = await asyncio.wait_for(reader.read(8), self.timeout)
+            latency = time.ticks_ms() - start_check_time
         except OSError as e:
             if e.errno == 110:
-                return False
+                return float("nan")
             else:
                 raise
         except asyncio.TimeoutError:
-            return False
+            return float("nan")
         finally:
             sock.close()
             reader.close()
@@ -184,4 +274,7 @@ class DNSService(Service):
             await writer.wait_closed()
 
         # Checks if response has same ID as request and if RCODE=3 (NXDOMAIN)
-        return result[0:2] == b"\xAA\xAA" and result[3] & 0x0F == 3
+        if result[0:2] == b"\xAA\xAA" and result[3] & 0x0F == 3:
+            return latency
+        else:
+            return float("nan")

@@ -109,13 +109,13 @@ To test the email configuration, set the `send_test_email` option to `true` in t
 
 ### Services
 
- - `name`: (Required) Identifiable name for service used in email notifications
+ - `name`: (Required) Identifiable name for service used in email notifications. Don't use spaces
  - `host`: (Required) IP address or hostname (eg `9.9.9.9` or `www.google.com`). HTTP services can include a path (eg `www.google.com/about`)
  - `type`: (Required) Must be `http`, `dns` or `icmp` (ping)
  - `port`: (Optional) Specifies port for HTTP services. Defaults to `80`
  - `response_code`: (Optional) Specifies response code to check against for HTTP services. Defaults to `200`
- - `check_interval`: (Optional) Time between checks in seconds. Defaults to `60`
- - `timeout`: (Optional) Timeout of request in seconds. Defaults to `5`
+ - `check_interval`: (Optional) Time between checks in seconds. Defaults to `180`
+ - `timeout`: (Optional) Timeout of request in seconds. Defaults to `1`
  - `notify_after_failures`: (Optional) Number of consecutive failures before service offline alert is sent. Defaults to `3`
 
 Example:
@@ -123,12 +123,12 @@ Example:
 ```json
 {
   "name": "google",
-  "check_interval": 60,
+  "check_interval": 180,
   "type": "http",
   "port": 8080,
   "host": "www.google.com/minutePing",
   "response_code": 404, 
-  "timeout": 2,
+  "timeout": 1,
   "notify_after_failures": 2
 }
 ```
