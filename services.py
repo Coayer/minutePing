@@ -173,27 +173,27 @@ class ICMPService(Service):
         h.id[0:2] = uos.urandom(2)
         h.seq = 1
 
-        try:
-            addr = socket.getaddrinfo(self.host, 1)[0][-1][0]  # ip address
-        except IndexError:
-            print("Could not determine the address of", self.host)
-            return float("nan")
-
-        # init socket
-        sock = socket.socket(socket.AF_INET, socket.SOCK_RAW, 1)
-        sock.setblocking(False)
-
-        try:
-            sock.connect((addr, 1))
-        except OSError as e:
-            if e.errno != 115:
-                raise
-
-        reader = asyncio.StreamReader(sock)
-        writer = asyncio.StreamWriter(sock, {})
-
-        # needed because wifi pings are temperamental
+        # needed because wifi pings are super temperamental
         for seq in range(5):
+            try:
+                addr = socket.getaddrinfo(self.host, 1)[0][-1][0]  # ip address
+            except IndexError:
+                print("Could not determine the address of", self.host)
+                return float("nan")
+
+            # init socket
+            sock = socket.socket(socket.AF_INET, socket.SOCK_RAW, 1)
+            sock.setblocking(False)
+
+            try:
+                sock.connect((addr, 1))
+            except OSError as e:
+                if e.errno != 115:
+                    raise
+
+            reader = asyncio.StreamReader(sock)
+            writer = asyncio.StreamWriter(sock, {})
+
             h.seq = seq
             h.timestamp = time.ticks_us()
             h.checksum = self.checksum(pkt)
@@ -212,23 +212,19 @@ class ICMPService(Service):
                     raise
             except asyncio.TimeoutError:
                 continue
-
-            resp_mv = memoryview(resp)
-            h2 = uctypes.struct(uctypes.addressof(resp_mv[20:]), pkt_desc, uctypes.BIG_ENDIAN)
-
-            if h2.type == 0 and h2.id == h.id and h2.seq==seq:
+            finally:
                 sock.close()
                 reader.close()
                 await reader.wait_closed()
                 writer.close()
                 await writer.wait_closed()
+
+            resp_mv = memoryview(resp)
+            h2 = uctypes.struct(uctypes.addressof(resp_mv[20:]), pkt_desc, uctypes.BIG_ENDIAN)
+
+            if h2.type == 0 and h2.id == h.id and h2.seq == seq:
                 return latency
 
-        sock.close()
-        reader.close()
-        await reader.wait_closed()
-        writer.close()
-        await writer.wait_closed()
         return float("nan")
 
 
