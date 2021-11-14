@@ -1,6 +1,7 @@
 # minutePing
 
-Server status monitoring firmware for the ESP8266 in MicroPython. Supports email notifications.
+Server status monitoring firmware for the ESP8266 in MicroPython. Features email notifications for ICMP echo (ping), HTTP and DNS service checks;
+status webpage with historical latency graphs; watchdog timer.
 
 ## Installation
 
@@ -10,8 +11,7 @@ Connect your board to your PC.
 
 ```bash
 # creates Python venv in current directory and installs tools
-python3 -m venv minutePing && source minutePing/bin/activate && pip install --upgrade pip
-&& pip install esptool adafruit-ampy
+python3 -m venv minutePing && source minutePing/bin/activate && pip install --upgrade pip && pip install esptool adafruit-ampy
 
 #adds user to dialout group
 sudo usermod -aG dialout $USER
