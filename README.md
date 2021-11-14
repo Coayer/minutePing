@@ -11,7 +11,7 @@ Connect your board to your PC.
 ```bash
 # creates Python venv in current directory and installs tools
 python3 -m venv minutePing && source minutePing/bin/activate && pip install --upgrade pip
-&& pip install esptool
+&& pip install esptool adafruit-ampy
 
 #adds user to dialout group
 sudo usermod -aG dialout $USER
@@ -23,7 +23,19 @@ esptool.py --port /dev/ttyUSB0 --baud 460800 write\_flash --flash\_size=detect 0
 rm -rf minutePing # (optional) deletes tools
 ```
 
-Before continuing with the next steps, read the [configuration documentation](#configuration) below.
+Before continuing with the next steps, read the [configuration documentation](#configuration) below. 
+
+Create your `config.json` file, and upload to the board via USB or WebREPL.
+
+#### Updating `config.json` via USB
+
+`ampy -p /dev/ttyUSB0 put config.json && ampy -p /dev/ttyUSB0 reset`
+
+#### Updating `config.json` via WebREPL
+
+The WebREPL gives remote access to your minutePing installation. It can be used to check logs in realtime and modify the `config.json` file.
+
+##### First install
 
 Visit http://micropython.org/webrepl/ and keep the tab open. Browsers may redirect to HTTPS. If this happens, clear site data for micropython.org and navigate directly to the HTTP URL.
 
@@ -37,20 +49,14 @@ Reset your board by disconnecting it from power or using its RST button.
 
 If there is a problem with the uploaded `config.json` file, you can modify it using the same process (after the bash commands).
 
-#### Updating `config.json` via USB
-
-`ampy -p /dev/ttyUSB0 put config.json`
-
-#### Updating `config.json` via WebREPL
-
-The WebREPL gives remote access to your minutePing installation. It can be used to check logs in realtime and modify the `config.json` file.
+##### WiFi previously configured
 
 Enter the IP address of your board in a web browser. You should see the status page. Click the "Administrator interface" link. To fetch the existing `config.json` file from the board, use the "Get a file" option.
 Click the terminal widget and press `CTRL+C` to stop minutePing. The board will then reboot automatically.
 
 #### Updating minutePing firmware
 
-Before flashing, check release on GitLab for breaking changes with `config.json`.
+Before flashing, check release notes on GitHub.
 
 ```bash
 source minutePing/bin/activate # if this fails, instead enter:
@@ -73,8 +79,6 @@ While minutePing is starting and while services are being checked, the LED on th
 
 minutePing does not support SMTP over SSL/TLS. Use a free SMTP server with a dedicated account to avoid exposing your personal email account.
 
-To test the email configuration, set the `send_test_email` option to `true` in the `email` section. This will send a test email using the settings from `configuration.json` when minutePing starts. minutePing's emails may be marked as spam, so refer to your email provider's documentation on whitelisting email addresses. 
-
 ### Sample configuration file
 
 ```json
@@ -83,28 +87,32 @@ To test the email configuration, set the `send_test_email` option to `true` in t
     {
       "name": "",
       "type": "",
-      "host": ""
+      "host": "",
     }
   ],
-
+   
+  "notifiers": [
+     {
+      "type": "email", 
+      "test": false, 
+      "recipient_addresses": "",
+      "smtp_server": "",
+      "port": 587,
+      "username": "",
+      "password": ""
+    }
+  ],
+   
   "network": {
     "ssid": "",
     "password": ""
   },
-
-  "email": {
-    "recipient_addresses": "",
-    "smtp_server": "",
-    "port": 587,
-    "username": "",
-    "password": "",
-    "send_test_email": true
-  },
-
-  "webrepl" : {
+   
+  "webrepl": {
     "password": "pingpong"
-  }
+  },
 }
+
 ```
 
 ### Services
@@ -113,7 +121,7 @@ To test the email configuration, set the `send_test_email` option to `true` in t
  - `host`: (Required) IP address or hostname (eg `9.9.9.9` or `www.google.com`). HTTP services can include a path (eg `www.google.com/about`)
  - `type`: (Required) Must be `http`, `dns` or `icmp` (ping)
  - `port`: (Optional) Specifies port for HTTP services. Defaults to `80`
- - `response_code`: (Optional) Specifies response code to check against for HTTP services. Defaults to `200`
+ - `response_code`: (Optional, for HTTP services) Specifies response code to check against. Defaults to `200`
  - `check_interval`: (Optional) Time between checks in seconds. Defaults to `180`
  - `timeout`: (Optional) Timeout of request in seconds. Defaults to `1`
  - `notify_after_failures`: (Optional) Number of consecutive failures before service offline alert is sent. Defaults to `3`
@@ -130,6 +138,33 @@ Example:
   "response_code": 404, 
   "timeout": 1,
   "notify_after_failures": 2
+}
+```
+
+### Notifiers
+
+ - `type`: (Required) Type of notifier. Only `email` is valid currently
+ - `test`: (Optional) Will send a test notification on boot. Defaults to `false`
+
+#### Email options
+
+ - `recipient_addresses`: (Required) Email addresses to send alerts to. Can be single address or array
+ - `smtp_server`: (Required) SMTP server
+ - `port`: (Required) SMTP port
+ - `username`: (Required) SMTP username
+ - `password`: (Required) SMTP password
+
+Example:
+
+```json
+{
+      "type": "email",
+      "recipient_addresses": "hi@example.com",
+      "smtp_server": "smtp.example.org",
+      "port": 587,
+      "username": "hello",
+      "password": "hunter2",
+      "test": false
 }
 ```
 
@@ -155,27 +190,6 @@ Example:
      "gateway": "192.168.1.1", 
      "dns": "9.9.9.9"
     }
-}
-```
-
-### Email
-
- - `recipient_addresses`: (Required) Email addresses to send alerts to. Can be single address or array
- - `smtp_server`: (Required) SMTP server
- - `port`: (Required) SMTP port
- - `username`: (Required) SMTP username
- - `password`: (Required) SMTP password
- - `send_test_email`: (Optional) Will send a test email on boot. Defaults to `false`
-
-Example:
-
-```json
-{
-  "recipient_addresses": "targetemail@domain.com",
-  "smtp_server": "smtp.mail.com",
-  "port": 587,
-  "username": "me@mail.com",
-  "password": "123456789"
 }
 ```
 
