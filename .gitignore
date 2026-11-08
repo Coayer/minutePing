@@ -1,1 +1,10 @@
 /config.json
+/ca.pem
+/build/
+__pycache__/
+*.pyc
+/tests/out/
+.DS_Store
+/phase0.jsonl
+/phase0_watch.log
+/config.template.json

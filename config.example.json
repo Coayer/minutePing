@@ -1,0 +1,93 @@
+{
+  "network": {
+    "ssid": "MyWiFiNetwork",
+    "password": "hunter2",
+    "hostname": "minuteping",
+    "power_save": false
+  },
+
+  "tls": {
+    "ca_file": "ca.pem"
+  },
+
+  "notifiers": [
+    {
+      "name": "ops-mail",
+      "type": "email",
+      "recipient_addresses": ["you@example.com"],
+      "smtp_server": "smtp.example.org",
+      "port": 465,
+      "security": "tls",
+      "username": "minuteping@example.org",
+      "password": "hunter2",
+      "test": false
+    },
+    {
+      "name": "chat",
+      "type": "webhook",
+      "url": "https://example.com/hooks/abc123",
+      "test": false
+    },
+    {
+      "name": "console",
+      "type": "console"
+    }
+  ],
+
+  "services": [
+    {
+      "name": "gateway",
+      "type": "icmp",
+      "endpoint": "192.168.1.1",
+      "update_frequency": 60
+    },
+    {
+      "name": "homepage",
+      "type": "http",
+      "endpoint": "http://192.168.1.10/health",
+      "success_code": 200,
+      "update_frequency": 180,
+      "max_consecutive_failures": 2
+    },
+    {
+      "name": "public-site",
+      "type": "http",
+      "endpoint": "https://example.com/",
+      "ca_file": null
+    },
+    {
+      "name": "mailserver",
+      "type": "tcp",
+      "endpoint": "192.168.1.10:25",
+      "notifiers": ["ops-mail"]
+    },
+    {
+      "name": "resolver",
+      "type": "dns",
+      "endpoint": "9.9.9.9"
+    }
+  ],
+
+  "webrepl": {
+    "password": "pingpong"
+  },
+
+  "led": {
+    "pin": 8,
+    "active_low": true
+  },
+
+  "cpu": {
+    "idle_mhz": 80,
+    "busy_mhz": 160
+  },
+
+  "web_server": true,
+  "telnet_server": {
+    "port": 2323,
+    "refresh_seconds": 5
+  },
+  "watchdog": {
+    "timeout_ms": 30000
+  }
+}

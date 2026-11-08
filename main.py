@@ -1,227 +1,304 @@
-from json import load
-from machine import WDT, freq
-from services import *
-from notifiers import *
-from utils import *
-from math import isnan
+"""minutePing: server status monitoring for the ESP32.
+
+Boot order: read the config, join the network, set the clock, then hand control
+to the asyncio loop. Anything that goes wrong before the loop starts drops the
+board into an access point so the problem can be read and the config replaced.
+
+The clock is set before any alert goes out on purpose. Certificate
+verification checks the certificate's validity window, and the ESP32 boots at
+the start of its epoch, so an unsynchronised clock makes every verified TLS
+connection fail as though the certificate had expired.
+"""
+
+import asyncio
+import gc
 import sys
+import time
 import network
-import asciichartpy
-import uasyncio as asyncio
+from machine import WDT
+
+import config as configuration
+import log
+import web
+from notifiers import send_test_alerts
+from utils import Uptime, board, configure_led, led_off, led_on, rtc_timestamp, set_freq
+
+WIFI_TIMEOUT_SECONDS = 30
+NTP_RESYNC_SECONDS = 6 * 3600
+NTP_RETRY_SECONDS = 30
+INITIAL_NTP_RETRY_SECONDS = 5
+INITIAL_NTP_TIMEOUT_SECONDS = 60
+CHECK_STAGGER_SECONDS = 3  # spread first checks so they don't all allocate at once
+
+AP_SSID = "minutePing"
+AP_PASSWORD = "pingpong"
 
 
-async def web_server_handler(reader, writer):
-    print("Handling web request...")
-    freq(160000000)
+def access_point_fallback(message):
+    """Last resort: start an open-ish AP with WebREPL so the config can be fixed.
+
+    Never returns. The message repeats on the serial console and WebREPL so it
+    is visible however the board is reached.
+    """
+    print("=" * 60)
+    print("minutePing cannot start:")
+    print(message)
+    print("Connect to Wi-Fi '{}' (password '{}') and open".format(
+        AP_SSID, AP_PASSWORD))
+    print("http://micropython.org/webrepl/ to upload a corrected config.json.")
+    print("=" * 60)
+
+    led_on()  # solid LED means "stuck, needs attention"
 
     try:
-        line = await reader.readline()
-        print(line)
-        line = line.split(b' ')
+        import webrepl
 
-        if line[0] != b"GET":
-            writer.write("HTTP/1.0 400 Bad Request\r\n\r\n")
-            await writer.drain()
-        else:
-            service_path = line[1].split(b'/')[1]
-            while True:
-                line = await reader.readline()
-                if not line or line == b'\r\n':
-                    break
+        access_point = network.WLAN(network.AP_IF)
+        access_point.active(True)
+        access_point.config(essid=AP_SSID, authmode=network.AUTH_WPA_WPA2_PSK,
+                            password=AP_PASSWORD)
+        webrepl.start(password=AP_PASSWORD)
+    except Exception as error:
+        log.error("main", "Could not start the fallback access point: {}".format(error))
 
-            if service_path == b'':
-                table_rows = '\n'.join(["<tr><td><a href=\"{}\">{}</a></td><td>{}</td><td>{}</td></tr>".format(service.get_name(),
-                                                                                                    service.get_name(),
-                                                                                                    "Online" if service.get_status() else "Offline",
-                                                                                                    service.get_history()[-1] if not isnan(service.get_history()[-1]) else "N/A")
-                                        for service in monitored_services])
+    while True:
+        log.error("main", message)
+        time.sleep(10)
 
-                response = status_html.format(table_rows, sta_if.ifconfig()[0])
-                writer.write("HTTP/1.0 200 OK\r\nContent-type: text/html\r\n\r\n")
-                await writer.drain()
-                writer.write(response)
-                await writer.drain()
+
+def wifi_failure_reason(station):
+    """Turns station.status() into something worth acting on, if it can.
+
+    The ESP32 tells a rejected password apart from a network that is not there,
+    which the ESP8266 largely did not. That is the difference between fixing a
+    typo and moving the board, so it is worth putting in the fallback message.
+    """
+    reasons = {}
+    for name, reason in (
+            ("STAT_NO_AP_FOUND", "no access point with that SSID is in range"),
+            ("STAT_WRONG_PASSWORD", "the access point rejected the password"),
+            ("STAT_BEACON_TIMEOUT", "the access point stopped responding"),
+            ("STAT_HANDSHAKE_TIMEOUT", "the WPA handshake timed out"),
+            ("STAT_ASSOC_FAIL", "the access point refused to associate"),
+            ("STAT_CONNECT_FAIL", "the connection was refused")):
+        value = getattr(network, name, None)
+        if value is not None:
+            reasons[value] = reason
+
+    try:
+        return reasons.get(station.status())
+    except (OSError, ValueError):
+        return None
+
+
+def connect_wifi(ssid, password, static_address, hostname, power_save):
+    """Joins the network. Returns (station, reason); station is None on failure."""
+    station = network.WLAN(network.STA_IF)
+    station.active(True)
+
+    if hostname:
+        try:
+            network.hostname(hostname)
+        except (AttributeError, OSError, ValueError) as error:
+            log.warning("wifi", "Could not set hostname '{}': {}".format(hostname, error))
+
+    if not power_save:
+        # Wi-Fi power save is on by default on the ESP32 and parks the radio
+        # between beacons, which adds tens of milliseconds of jitter to every
+        # measurement. This board exists to measure latency, so it is off
+        # unless asked for.
+        try:
+            station.config(pm=network.WLAN.PM_NONE)
+        except (AttributeError, OSError, ValueError) as error:
+            log.warning("wifi", "Could not disable Wi-Fi power save: {}".format(error))
+
+    if static_address is not None:
+        log.info("wifi", "Using static address {}".format(static_address))
+        station.ifconfig(static_address)
+
+    if not station.isconnected():
+        log.info("wifi", "Connecting to '{}'...".format(ssid))
+        station.connect(ssid, password)
+
+        deadline = time.ticks_add(time.ticks_ms(), WIFI_TIMEOUT_SECONDS * 1000)
+        while not station.isconnected():
+            if time.ticks_diff(deadline, time.ticks_ms()) <= 0:
+                return None, wifi_failure_reason(station)
+            time.sleep_ms(200)
+
+    log.info("wifi", "Connected: {}".format(station.ifconfig()))
+    return station, None
+
+
+def sync_time():
+    """One blocking NTP round trip. Returns True if the RTC was set.
+
+    ntptime uses a blocking socket, unlike everything else here, so this
+    briefly stalls the event loop. Bounded by ntptime.timeout and run rarely.
+    """
+    import ntptime
+
+    ntptime.timeout = 2
+
+    try:
+        ntptime.settime()
+        return True
+    except (OSError, OverflowError, ValueError) as error:
+        log.warning("ntp", "sync failed ({})".format(error))
+        return False
+
+
+async def initial_time_sync(dashboard, verification_enabled):
+    """Sets the clock before the first alert can try to verify a certificate.
+
+    Bounded: a dead NTP server should delay alerting, never prevent the board
+    from monitoring. ntp_task keeps trying afterwards either way.
+    """
+    deadline = time.ticks_add(time.ticks_ms(), INITIAL_NTP_TIMEOUT_SECONDS * 1000)
+
+    while True:
+        if sync_time():
+            dashboard.last_sync = rtc_timestamp()
+            log.info("ntp", "synchronised: {} UTC".format(dashboard.last_sync))
+            return True
+
+        if time.ticks_diff(deadline, time.ticks_ms()) <= 0:
+            if verification_enabled:
+                log.warning("ntp", "the clock is not set and TLS verification is "
+                            "on, so https alerts will fail as 'expired certificate' "
+                            "until NTP succeeds.")
             else:
-                for service in monitored_services:
-                    if service.get_name().encode("UTF-8") == service_path:
-                        max_latency = max(service.get_history()) if len(service.get_history()) != 0 else 1  # no pings
-                        max_latency = max_latency if not isnan(max_latency) else 1  # protects max([nan, 5]) = nan
-                        response = service_html.format(service.get_name(),
-                                                       asciichartpy.plot(service.get_history(), height=10,
-                                                       maximum=max_latency if max_latency % 50 == 0 else max_latency + 50 - max_latency % 50),
-                                                       "{:0.0f} minutes ago".format(service.get_check_interval() * len(service.get_history()) / 60))
-                        writer.write("HTTP/1.0 200 OK\r\nContent-type: text/html\r\n\r\n")
-                        await writer.drain()
-                        writer.write(response)
-                        await writer.drain()
-                        return
+                log.warning("ntp", "continuing without a synchronised clock; alert "
+                            "timestamps will be wrong until NTP succeeds.")
+            return False
 
-                print("404")
-                writer.write("HTTP/1.0 404 Not Found\r\n\r\n")
-                await writer.drain()
-    except OSError as e:
-        print("Web server encountered OSError " + str(e))
-    finally:
-        reader.close()
-        await reader.wait_closed()
-        writer.close()
-        await writer.wait_closed()
-        freq(80000000)
+        await asyncio.sleep(INITIAL_NTP_RETRY_SECONDS)
 
 
-def wifi_ap_fallback(message):
-    print("AP fallback: {}".format(message))
-    import webrepl, time
-
-    ap_if = network.WLAN(network.AP_IF)
-    ap_if.config(essid=b"minutePing", authmode=network.AUTH_WPA_WPA2_PSK, password=b"pingpong")
-    webrepl.start(password="pingpong")
-
+async def ntp_task(dashboard):
+    """Keeps the RTC roughly correct so alert timestamps stay meaningful."""
     while True:
-        print(message)
-        time.sleep(5)
+        await asyncio.sleep(
+            NTP_RESYNC_SECONDS if dashboard.last_sync else NTP_RETRY_SECONDS)
+
+        if sync_time():
+            dashboard.last_sync = rtc_timestamp()
+            log.info("ntp", "synchronised: {} UTC".format(dashboard.last_sync))
 
 
-# for debugging https://github.com/peterhinch/micropython-async/blob/master/v3/docs/TUTORIAL.md#22-coroutines-and-tasks
-def set_global_exception():
-    def handle_exception(loop, context):
-        sys.print_exception(context["exception"])
-        sys.exit()
-
-    loop = asyncio.get_event_loop()
-    loop.set_exception_handler(handle_exception)
-
-
-async def main():
-    set_global_exception()
-
-    for service in monitored_services:
-        asyncio.create_task(service.monitor())
-
+async def supervisor(watchdog, uptime):
+    """Feeds the watchdog and advances the rollover-safe uptime counter."""
     while True:
-        if watchdog_enabled:
-            wdt.feed()
-        await asyncio.sleep(0.5)
+        if watchdog is not None:
+            watchdog.feed()
+        uptime.tick()
+        await asyncio.sleep_ms(500)
 
 
-led(0)
-
-try:
-    with open("config.json", "r") as config_file:
-        config = load(config_file)
-except ValueError:
-    wifi_ap_fallback("Invalid JSON in config file!")
-except OSError:
-    wifi_ap_fallback("minutePing successfully installed. See documentation for creating a config.json file.")
-
-try:
-    print("Loading configuration...")
-
-    ssid = config["network"]["ssid"]
-    wifi_password = config["network"]["password"]
-
-    if "static_address" in config["network"]:
-        static_address = (
-            config["network"]["static_address"]["ip"],
-            config["network"]["static_address"]["netmask"],
-            config["network"]["static_address"]["gateway"],
-            config["network"]["static_address"]["dns"]
-        )
+def report_exception(loop, context):
+    exception = context.get("exception")
+    if exception is not None:
+        log.exception("main", "Unhandled exception in a task:", exception)
     else:
-        static_address = None
+        log.error("main", "Unhandled exception in a task: {}".format(
+            context.get("message", context)))
 
-    webrepl_enabled = "webrepl" in config
-    if webrepl_enabled:
-        webrepl_password = config["webrepl"]["password"]
-        if len(webrepl_password) < 4 or len(webrepl_password) > 9:
-            raise ValueError("WebREPL password must be between 4 and 9 characters")
 
-    web_server_enabled = config["web_server"] if "web_server" in config else True
+async def main(settings, station, uptime):
+    asyncio.get_event_loop().set_exception_handler(report_exception)
 
-    watchdog_enabled = config["watchdog"] if "watchdog" in config else True
+    monitors = settings["monitors"]
+    dashboard = web.Dashboard(monitors, station, uptime,
+                              webrepl_enabled=settings["webrepl_password"] is not None,
+                              idle_mhz=settings["idle_mhz"],
+                              busy_mhz=settings["busy_mhz"])
 
-    notifiers = []
-    for notifier_config in config["notifiers"]:
-        if notifier_config["type"] not in ["email"]:
-            print("Notifier configuration is of invalid type {}".format(notifier_config["type"]))
-            sys.exit(1)
-        elif notifier_config["type"] == "email":
-            notifiers.append(EmailNotifier(notifier_config))
+    if settings["web_server"]:
+        log.info("web", "Starting web server on http://{}/".format(dashboard.address()))
+        asyncio.create_task(asyncio.start_server(dashboard.handle, "0.0.0.0", 80, 5))
 
-    monitored_services = []
-    for service_config in config["services"]:
-        if service_config["type"] not in ["icmp", "http", "dns"]:
-            print(
-                "Service configuration {} is of invalid type {}".format(service_config["name"], service_config["type"]))
-            sys.exit(1)
-        elif service_config["type"] == "http":
-            monitored_services.append(HTTPService(service_config, notifiers))
-        elif service_config["type"] == "icmp":
-            monitored_services.append(ICMPService(service_config, notifiers))
-        elif service_config["type"] == "dns":
-            monitored_services.append(DNSService(service_config, notifiers))
+    if settings["telnet"]:
+        import tui
 
-except KeyError as e:
-    wifi_ap_fallback("Missing required configuration value " + e.args[0])
+        terminal = tui.Terminal(dashboard, settings["telnet"]["refresh_seconds"])
+        log.info("tui", "Starting terminal view on telnet {} {}".format(
+            dashboard.address(), settings["telnet"]["port"]))
+        asyncio.create_task(asyncio.start_server(
+            terminal.handle, "0.0.0.0", settings["telnet"]["port"], 2))
 
-del config  # safe to delete because only needed for config loading
+    for index, monitor in enumerate(monitors):
+        asyncio.create_task(monitor.run(start_delay=index * CHECK_STAGGER_SECONDS))
 
-print("Activating Wi-Fi...")
+    watchdog = None
+    if settings["watchdog_ms"]:
+        log.info("main", "Starting watchdog timer ({} ms)".format(settings["watchdog_ms"]))
+        # The ESP32 needs an explicit timeout, where the ESP8266 chose its own,
+        # and it panics and reboots rather than quietly resetting.
+        watchdog = WDT(timeout=settings["watchdog_ms"])
 
-sta_if = network.WLAN(network.STA_IF)
-sta_if.active(True)
+    asyncio.create_task(supervisor(watchdog, uptime))
 
-if static_address is not None:
-    print("Using static network address :", static_address)
-    sta_if.ifconfig(static_address)
+    # Monitoring is already running by this point, so a slow NTP server delays
+    # only the alerts that need a trustworthy clock.
+    await initial_time_sync(dashboard, settings["ca_file"] is not None)
+    asyncio.create_task(ntp_task(dashboard))
 
-print("Connecting to Wi-Fi network...")
-sta_if.connect(ssid, wifi_password)
-while not sta_if.isconnected():
-    pass
+    telnet = settings["telnet"]
+    await send_test_alerts(settings["notifiers"],
+                           dashboard.boot_report(settings["web_server"],
+                                                 telnet["port"] if telnet else None))
 
-print("Connected with network configuration " + str(sta_if.ifconfig()))
+    gc.collect()
+    log.info("main", "minutePing {} running. {} bytes free.".format(
+        web.VERSION, gc.mem_free()))
+    led_off()
 
-if webrepl_enabled:
-    print("Starting WebREPL...")
-    import webrepl
+    while True:
+        await asyncio.sleep(3600)
 
-    webrepl.start(password=webrepl_password)
 
-if web_server_enabled:
-    asyncio.create_task(asyncio.start_server(web_server_handler, "0.0.0.0", 80, 20))
-    status_html = """<!DOCTYPE html>
-    <html>
-        <meta name="viewport" content="width=device-width, initial-scale=1" charset="utf-8">
-        <style> * {{ font-family: monospace; }} </style>
-        <head> <title>minutePing 1.1.0</title> </head>
-        <body> <h1>Monitored services</h1> 
-            <table border="1"> <tr><th>Name</th><th>Status</th><th>Latency (ms)</th></tr> {} </table>
-            <p><a href="http://micropython.org/webrepl/#{}:8266/">Administrator interface</a><p>
-        </body>
-    </html>"""
-    service_html = """<!DOCTYPE html>
-        <html>
-            <meta name="viewport" content="width=device-width, initial-scale=1" charset="utf-8">
-            <style> * {{ font-family: monospace; }} </style>
-            <head> <title>minutePing 1.1.0</title> </head>
-            <body> <h1>{}</h1> 
-                <pre>
-  (ms)
-{}
-      {}
-                </pre>
-                <p><a href="/">Back</a><p>
-            </body>
-        </html>"""
+def boot():
+    print()
+    log.info("main", "minutePing {} starting...".format(web.VERSION))
 
-led(1)
+    try:
+        settings = configuration.load()
+    except configuration.ConfigError as error:
+        access_point_fallback(str(error))
+        return
 
-if watchdog_enabled:
-    print("Starting watchdog timer...")
-    wdt = WDT()
+    log.set_level(settings["log_level"])
+    configure_led(settings["led_pin"], settings["led_active_low"])
+    led_on()
+    set_freq(settings["idle_mhz"])
 
-try:
-    asyncio.run(main())
-finally:
-    asyncio.new_event_loop()
+    station, reason = connect_wifi(settings["ssid"], settings["password"],
+                                   settings["static_address"], settings["hostname"],
+                                   settings["power_save"])
+    if station is None:
+        access_point_fallback(
+            "Could not join Wi-Fi network '{}' within {} seconds{}. Check the "
+            "SSID and password in config.json.".format(
+                settings["ssid"], WIFI_TIMEOUT_SECONDS,
+                ": {}".format(reason) if reason else ""))
+        return
+
+    if settings["webrepl_password"] is not None:
+        log.info("main", "Starting WebREPL")
+        import webrepl
+
+        webrepl.start(password=settings["webrepl_password"])
+
+    uptime = Uptime()
+    board.station = station
+    board.hostname = settings["hostname"]
+    board.uptime = uptime
+    gc.collect()
+
+    try:
+        asyncio.run(main(settings, station, uptime))
+    finally:
+        asyncio.new_event_loop()
+
+
+boot()

@@ -1,53 +1,150 @@
-from services import Service
-from utils import rtc
-import ntptime
+"""Alert delivery. Every notifier returns True only on confirmed delivery, so
+Monitor's latch retries on the next check rather than dropping the alert.
+"""
+
+import asyncio
+import json
+
+import httpc
+import log
 import umail
-import uasyncio as asyncio
+from utils import FAILED, board, rtc_timestamp
 
 
-# TODO change to superclass of notifiers
-
-class EmailNotifier:
+class Notifier:
     def __init__(self, config):
-        self.recipient_email_addresses = config["recipient_addresses"]
-        self.smtp_server = config["smtp_server"]
-        self.smtp_port = config["port"]
-        self.smtp_username = config["username"]
-        self.smtp_password = config["password"]
+        self.name = config["name"]
+        self.test = config.get("test", False)
 
-        send_test = config["test"] if "test" in config else False
-        if send_test:
-            asyncio.create_task(self.notify(Service({"name": "TEST EMAIL SERVICE", "host": "email.test"}), "BEING TESTED"))
-        del config
+    async def post(self, subject, body, monitor, status):
+        raise NotImplementedError("notifier subclass must implement post()")
 
-    async def notify(self, service_object, status):
-        await ntptime.settime()
 
-        minutes_since_failure = service_object.get_check_interval() * service_object.get_number_of_failures() / 60
-        minutes_since_failure = int(minutes_since_failure) if int(minutes_since_failure) == minutes_since_failure \
-            else round(minutes_since_failure, 1)
+class ConsoleNotifier(Notifier):
+    """Prints alerts. Useful for a first run without an SMTP account."""
 
-        current_time = rtc.datetime()
+    async def post(self, subject, body, monitor, status):
+        print("-" * 48)
+        print("ALERT [{}] {}".format(rtc_timestamp(), subject))
+        print(body)
+        print("-" * 48)
+        return True
 
-        print("Sending email notification...")
+
+class EmailNotifier(Notifier):
+    def __init__(self, config):
+        Notifier.__init__(self, config)
+        self.recipients = config["recipient_addresses"]
+        self.server = config["smtp_server"]
+        self.port = config.get("port", 587)
+        self.username = config["username"]
+        self.password = config["password"]
+        # None lets umail pick from the port: implicit TLS on 465, STARTTLS
+        # elsewhere. "none" opts back out and sends the password in the clear.
+        self.security = config.get("security")
+        self.ca_file = config.get("ca_file")
+
+    async def post(self, subject, body, monitor, status):
+        log.info("email", "Sending email via {}...".format(self.server))
+
+        smtp = umail.SMTP()
+        try:
+            await smtp.login(self.server, self.port, self.username,
+                             self.password, self.ca_file, self.security)
+            await smtp.to(self.recipients)
+            await smtp.send(
+                "From: minutePing <{}>\r\n"
+                "Subject: minutePing: {}\r\n"
+                "\r\n"
+                "{}\r\n"
+                "\r\n"
+                "Time: {} UTC\r\n".format(self.username, subject, body, rtc_timestamp()))
+            await smtp.quit()
+            log.info("email", "Email sent")
+            return True
+        except (AssertionError, OSError, ValueError, MemoryError,
+                asyncio.TimeoutError) as error:
+            log.error("email", "Email delivery failed: {}".format(error))
+            try:
+                await smtp.close()
+            except Exception:
+                pass
+            return False
+
+
+class WebhookNotifier(Notifier):
+    def __init__(self, config):
+        Notifier.__init__(self, config)
+        self.url = config["url"]
+        self.method = config.get("method", "POST")
+        self.headers = config.get("headers", {})
+        self.timeout = config.get("timeout", 10)
+        self.ca_file = config.get("ca_file")
+
+    async def post(self, subject, body, monitor, status):
+        latency = monitor.history.latest() if monitor is not None else FAILED
+
+        payload = json.dumps({
+            # "content"/"text" are for Discord and Slack, which only render a
+            # message if one of their expected fields is present; otherwise
+            # they 400 and the alert is never confirmed delivered.
+            "content": body,
+            "text": body,
+            "service": monitor.name if monitor is not None else "test",
+            "type": monitor.type if monitor is not None else "test",
+            "endpoint": monitor.endpoint if monitor is not None else "",
+            "status": status,
+            "failures": monitor.failures if monitor is not None else 0,
+            "latency_ms": None if latency == FAILED else latency,
+            "subject": subject,
+            "message": body,
+            "time": rtc_timestamp(),
+            "hostname": board.hostname,
+            "board_ip": board.address(),
+            "uptime": board.uptime_text(),
+        })
+
+        headers = {"Content-Type": "application/json"}
+        headers.update(self.headers)
+
+        log.info("webhook", "Posting webhook to {}...".format(self.url))
 
         try:
-            smtp = umail.SMTP()
-            # to = RECIPIENT_EMAIL_ADDRESSES if type(RECIPIENT_EMAIL_ADDRESSES) == str else ", ".join(RECIPIENT_EMAIL_ADDRESSES)
-            await smtp.login(self.smtp_server, self.smtp_port, self.smtp_username, self.smtp_password)
-            await smtp.to(self.recipient_email_addresses)
-            await smtp.send("From: minutePing <{}>\n"
-                            "Subject: Monitored service {} is {}\n\n"
-                            "Current time: {:02d}:{:02d}:{:02d} {:02d}/{:02d}/{} UTC\n\n"
-                            "Monitored service {} was detected as {} {:0.0f} minutes ago.\n".format(self.smtp_username,
-                                        service_object.get_name(), status,
-                                        current_time[4], current_time[5], current_time[6],
-                                        current_time[2], current_time[1], current_time[0],
-                                        service_object.get_name(), status, minutes_since_failure))
-            await smtp.quit()
-
-            print("Email successfully sent")
-            return True
-        except (AssertionError, OSError, asyncio.TimeoutError) as e:
-            print("Failed to send email notification: " + str(e.args[0]))
+            code, _ = await httpc.request(
+                self.method, self.url, headers=headers,
+                body=payload, timeout=self.timeout, ca_file=self.ca_file)
+        except (OSError, ValueError, MemoryError, asyncio.TimeoutError) as error:
+            log.error("webhook", "Webhook delivery failed: {}".format(error))
             return False
+
+        if code is not None and 200 <= code < 300:
+            log.info("webhook", "Webhook accepted ({})".format(code))
+            return True
+
+        log.error("webhook", "Webhook rejected (status {})".format(code))
+        return False
+
+
+NOTIFIER_TYPES = {
+    "console": ConsoleNotifier,
+    "email": EmailNotifier,
+    "webhook": WebhookNotifier,
+}
+
+
+async def send_test_alerts(notifiers, report=None):
+    """Fires a startup alert through every notifier marked "test": true.
+
+    `report` is the boot summary (signal, reset cause, IP and so on); without
+    one the alert only confirms the notifier works.
+    """
+    for notifier in notifiers:
+        if not notifier.test:
+            continue
+        log.info("notify", "Sending test alert via {}...".format(notifier.name))
+        try:
+            body = "{}\nNotifier '{}' is configured correctly.".format(
+                report or "This is a minutePing test alert.", notifier.name)
+            await notifier.post("minutePing started", body, None, "test")
+        except Exception as error:
+            log.error("notify", "Test alert via {} failed: {}".format(notifier.name, error))
