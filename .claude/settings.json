@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python3 -c ' *)",
+      "Bash(python3 tests/test_logic.py)",
+      "WebFetch(domain:docs.micropython.org)",
+      "Bash(.flashenv/bin/mpremote connect *)"
+    ]
+  }
+}
